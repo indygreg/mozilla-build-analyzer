@@ -32,6 +32,12 @@ class CLI(object):
         for category in sorted(set(t[2] for t in builders)):
             print(category)
 
+    def builders_in_category(self, category):
+        builders = self.connection.builders()
+
+        for builder in sorted(t[1] for t in builders if t[2] == category):
+            print(builder)
+
     def load_job_data(self, day_count=None, days=None):
         times = []
 
@@ -140,6 +146,12 @@ def main():
     builder_categories = subparsers.add_parser('builder-categories',
         help='Print all the builder categories.')
     builder_categories.set_defaults(func='builder_categories')
+
+    builders_in_category = subparsers.add_parser('builders-in-category',
+        help='Print all the builders in a specific category.')
+    builders_in_category.set_defaults(func='builders_in_category')
+    builders_in_category.add_argument('category',
+        help='The category to filter on.')
 
     ljd = subparsers.add_parser('load-job-data',
         help='Load information about buildbot jobs into storage.')
