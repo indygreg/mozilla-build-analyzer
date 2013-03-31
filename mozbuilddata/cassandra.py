@@ -146,7 +146,7 @@ class Connection(object):
 
         ids = self.job_ids_on_slave(name)
         cf = ColumnFamily(self.pool, 'jobs')
-        result = cf.multiget(ids, columns=self.basic_job_columns)
+        result = cf.multiget(ids)
 
         for key, cols in result.items():
             yield key, cols
@@ -166,36 +166,3 @@ class Connection(object):
 
         return gz.read()
 
-    @property
-    def basic_job_columns(self):
-        return (
-            'basedir',
-            'branch',
-            'build_url',
-            'builder_id',
-            'buildername',
-            'buildid',
-            'buildnumber',
-            'builduid',
-            'endtime',
-            'id',
-            'log_url',
-            'master',
-            'master_id',
-            'platform',
-            'product',
-            'project',
-            'reason',
-            'repo_path',
-            'repository',
-            'requesttime',
-            'result',
-            'revision',
-            'scheduler',
-            'script_repo_revision',
-            'slave_id',
-            'slavebuilddir',
-            'slavename',
-            'stage',
-            'starttime',
-        )
