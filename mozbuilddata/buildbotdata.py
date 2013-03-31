@@ -80,12 +80,10 @@ class DataLoader(object):
 
         result = {}
 
-        result['slave_count'] = self.load_slaves(obj['slaves'])
-        result['master_count'] = self.load_masters(obj['masters'])
-        result['build_count'] = self.load_builds(obj['builds'])
-        result['builders_count'] = self.load_builders(obj['builders'])
-
-        return result
+        yield 'Loaded %d slaves' % self.load_slaves(obj['slaves'])
+        yield 'Loaded %d masters' % self.load_masters(obj['masters'])
+        yield 'Loaded %d builders' % self.load_builders(obj['builders'])
+        yield 'Loaded %d jobs' % self.load_builds(obj['builds'])
 
     def load_missing_logs(self):
         """Loads all logs that aren't currently in storage."""

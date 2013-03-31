@@ -20,21 +20,30 @@ class CLI(object):
     def __init__(self, connection):
         self.connection = connection
 
-    def load_job_data(self, day=None):
-        t = time.gmtime()
-        if day:
-            t = time.strptime(day, '%Y-%m-%d')
+    def load_job_data(self, day_count=None, days=None):
+        times = []
 
-        t = calendar.timegm(t)
+        if day_count and days:
+            raise Exception('Can only specify 1 of day count or days.')
+
+        if day_count:
+            now = time.time()
+            # We don't do today because we likely don't have data yet.
+            for i in range(1, day_count + 1):
+                times.append(now - i * 86400)
+        else:
+            for day in days:
+                t = time.strptime(day, '%Y-%m-%d')
+                times.append(calendar.timegm(t))
+
+        if not times:
+            times.append(time.time())
 
         loader = BuildbotDataLoader(self.connection.pool)
-        result = loader.load_builds_from_day(t)
-
-        print('Loaded %d slaves' % result['slave_count'])
-        print('Loaded %d masters' % result['master_count'])
-        print('Loaded %d builders' % result['builders_count'])
-        print('Loaded %d jobs' % result['build_count'])
-
+        for t in times:
+            print(time.strftime('Loading data for %Y-%m-%d', time.gmtime(t)))
+            for msg in loader.load_builds_from_day(t):
+                print(msg)
 
     def load_raw_logs(self):
         loader = BuildbotDataLoader(self.connection.pool)
@@ -114,8 +123,10 @@ def main():
 
     ljd = subparsers.add_parser('load-job-data',
         help='Load information about buildbot jobs into storage.')
-    ljd.add_argument('--day',
+    ljd.add_argument('--day', nargs='*', dest='days',
         help='Day to load. Specified as a YYYY-MM-DD value.')
+    ljd.add_argument('--day-count', type=int,
+        help='Number of previous days of data to import.')
     ljd.set_defaults(func='load_job_data')
 
     ll = subparsers.add_parser('load-raw-logs',
