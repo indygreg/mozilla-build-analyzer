@@ -17,7 +17,6 @@ from mozbuilddata.buildbotdata import (
 )
 from mozbuilddata.cassandra import Connection
 from mozbuilddata.logparser.jobparser import parse_job_log
-from mozbuilddata.jobs import JobExplorer
 
 
 class CLI(object):
