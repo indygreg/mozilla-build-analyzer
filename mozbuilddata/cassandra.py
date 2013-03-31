@@ -13,6 +13,7 @@ from pycassa.columnfamily import ColumnFamily
 
 from pycassa.system_manager import (
     BYTES_TYPE,
+    KEYS_INDEX,
     LONG_TYPE,
     UTF8_TYPE,
 )
@@ -59,7 +60,12 @@ COLUMN_FAMILIES = {
     },
 }
 
-COLUMN_TYPES = {
+COLUMN_TYPES = {}
+
+INDEXES = {
+    'jobs': {
+        'builder_category': ('UTF8Type', KEYS_INDEX, 'category_index'),
+    },
 }
 
 
@@ -86,10 +92,26 @@ class Connection(object):
         for name, props in COLUMN_FAMILIES.items():
             if name not in cfs:
                 manager.create_column_family(keyspace, name, **props)
+                continue
 
-            # TODO only alter columns if they've changed.
+            # The logic here is likely crap. Surely this problem has been
+            # solved before...
+            existing = cfs[name]
+            existing_metadata = {d.name: d for d in existing.column_metadata}
+
             for column, column_type in COLUMN_TYPES.get(name, {}).items():
+                e = existing_metadata.get(column)
+                if e:
+                    continue
+
                 manager.alter_column(keyspace, name, column, column_type)
+
+            for column, index in INDEXES.get(name, {}).items():
+                e = existing_metadata.get(column)
+                if e and hasattr(e, 'index_name'):
+                    continue
+
+                manager.create_index(keyspace, name, column, *index)
 
         self.pool = pycassa.pool.ConnectionPool(keyspace, server_list=servers,
             *args, **kwargs)
