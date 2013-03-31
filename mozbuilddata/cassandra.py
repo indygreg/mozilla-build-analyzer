@@ -11,6 +11,12 @@ from StringIO import StringIO
 
 from pycassa.columnfamily import ColumnFamily
 
+from pycassa.index import (
+    EQ,
+    create_index_clause,
+    create_index_expression,
+)
+
 from pycassa.system_manager import (
     BYTES_TYPE,
     KEYS_INDEX,
@@ -141,6 +147,14 @@ class Connection(object):
 
         return cols.values()
 
+    def jobs_with_category(self, category):
+        """Obtain jobs having the specified category."""
+        cf = ColumnFamily(self.pool, 'jobs')
+
+        clause = self._column_equals_clause('builder_category', category)
+        for key, cols in cf.get_indexed_slices(clause):
+            yield key, cols
+
     def jobs_on_slave(self, name):
         """Obtain information about all jobs on a specific slave."""
 
@@ -166,3 +180,6 @@ class Connection(object):
 
         return gz.read()
 
+    def _column_equals_clause(self, column, value):
+        e = create_index_expression(column, value, EQ)
+        return create_index_clause([e])
