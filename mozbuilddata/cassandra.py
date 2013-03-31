@@ -37,12 +37,15 @@ COLUMN_FAMILIES = {
         'comparator_type': UTF8_TYPE,
         'default_validation_class': 'UTF8Type',
     },
+    'raw_job_logs': {
+        'comment': 'Raw job logs.',
+        'key_validation_class': 'UTF8Type',
+        'comparator_type': UTF8_TYPE,
+        'default_validation_class': 'BytesType',
+    },
 }
 
 COLUMN_TYPES = {
-    'jobs': {
-        'log_raw': BYTES_TYPE,
-    },
 }
 
 

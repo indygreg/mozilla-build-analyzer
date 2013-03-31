@@ -47,7 +47,7 @@ def fetch_log(params):
         return False, job, None
 
 
-def fetch_logs(cf, urls):
+def fetch_logs(cf, log_cf, urls):
     pool = multiprocessing.Pool(processes=4)
 
     entries = [(k, v) for k, v in urls.items()]
@@ -58,9 +58,11 @@ def fetch_logs(cf, urls):
         remaining -= 1
 
         if success:
-            cf.insert(unicode(job), {
-                'log_fetch_time': unicode(int(time.time())),
-                'log_raw': data,
+            now = unicode(int(time.time()))
+            cf.insert(unicode(job), {'log_fetch_time': now})
+            log_cf.insert(unicode(job), {
+                'fetch_time': now,
+                'log': data,
             })
             yield '%d Stored log for %s' % (remaining, job)
 
@@ -98,7 +100,8 @@ class DataLoader(object):
                 missing_urls[key] = cols['log_url']
 
         yield '%d missing logs will be fetched.' % len(missing_urls)
-        for result in fetch_logs(cf, missing_urls):
+        log_cf = ColumnFamily(self._pool, 'raw_job_logs')
+        for result in fetch_logs(cf, log_cf, missing_urls):
             yield result
 
     def load_slaves(self, o):
