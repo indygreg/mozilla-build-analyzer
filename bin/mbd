@@ -40,7 +40,7 @@ class CLI(object):
             # We don't do today because we likely don't have data yet.
             for i in range(1, day_count + 1):
                 times.append(now - i * 86400)
-        else:
+        elif days:
             for day in days:
                 t = time.strptime(day, '%Y-%m-%d')
                 times.append(calendar.timegm(t))
