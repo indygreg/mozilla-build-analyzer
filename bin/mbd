@@ -35,7 +35,7 @@ class CLI(object):
     def builders_in_category(self, category):
         builders = self.connection.builders()
 
-        for builder in sorted(t[1] for t in builders if t[2] == category):
+        for builder in sorted(set(t[1] for t in builders if t[2] == category)):
             print(builder)
 
     def load_job_data(self, day_count=None, days=None):
