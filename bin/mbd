@@ -11,7 +11,10 @@ import operator
 import sys
 import time
 
-from mozbuilddata.buildbotdata import DataLoader as BuildbotDataLoader
+from mozbuilddata.buildbotdata import (
+    DataLoader as BuildbotDataLoader,
+    available_build_files,
+)
 from mozbuilddata.cassandra import Connection
 from mozbuilddata.logparser.jobparser import parse_job_log
 from mozbuilddata.jobs import JobExplorer
@@ -20,6 +23,10 @@ from mozbuilddata.jobs import JobExplorer
 class CLI(object):
     def __init__(self, connection):
         self.connection = connection
+
+    def available_build_files(self):
+        for path, t, size in available_build_files():
+            print('%s\t%d' % (path, size))
 
     def builder_names(self):
         builders = self.connection.builders()
@@ -155,6 +162,10 @@ def main():
         help='Cassandra keyspace to use for storage.')
 
     subparsers = parser.add_subparsers()
+
+    available_build_files = subparsers.add_parser('available-build-files',
+        help='Info on Mozilla-exposed build files.')
+    available_build_files.set_defaults(func='available_build_files')
 
     builder_names = subparsers.add_parser('builder-names',
         help='Print the names of all builders.')

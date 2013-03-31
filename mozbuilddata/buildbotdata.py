@@ -8,17 +8,46 @@ import fnmatch
 import json
 import gzip
 import multiprocessing
+import re
 import time
 import urllib2
 
-from pycassa.columnfamily import ColumnFamily
-
 from StringIO import StringIO
+
+from pycassa.columnfamily import ColumnFamily
 
 
 # Where public build data is available from. Feed into strftime for the day you
 # want.
-BUILD_DATA_URL = 'http://builddata.pub.build.mozilla.org/buildjson/builds-%Y-%m-%d.js.gz'
+BUILD_DATA_PREFIX = 'http://builddata.pub.build.mozilla.org/buildjson/'
+BUILD_DATA_URL = BUILD_DATA_PREFIX + 'builds-%Y-%m-%d.js.gz'
+
+RE_BUILD_LISTING_ENTRY = re.compile(r'''
+    ^<a\shref="(?P<path>[^"]+)">[^<]+<\/a>
+    \s+
+    (?P<date>\d{2}-[^-]+-\d{4}\s\d{2}:\d{2})
+    \s+
+    (?P<size>\d+)
+    $''', re.VERBOSE)
+
+def available_build_files():
+    """Obtain info of available build data files on the server."""
+
+    # The HTML is simple enough we don't bother with a regular parser.
+    html = urllib2.urlopen(BUILD_DATA_PREFIX).read()
+
+    for line in html.splitlines():
+        if not line.startswith('<a'):
+            continue
+
+        match = RE_BUILD_LISTING_ENTRY.match(line)
+        assert match
+
+        d = match.groupdict()
+
+        t = time.strptime(d['date'], '%d-%b-%Y %H:%M')
+
+        yield d['path'], t, int(d['size'])
 
 
 def get_daily_data(t=None):
