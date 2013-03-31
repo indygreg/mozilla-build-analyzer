@@ -130,13 +130,23 @@ class DataLoader(object):
         cf = ColumnFamily(self._pool, 'jobs')
         batch = cf.batch()
 
-        for build in o:
-            self._load_build(batch, build)
+        slave_jobs = ColumnFamily(self._pool, 'slave_jobs')
+        sjb = slave_jobs.batch()
+
+        for job in o:
+            self._load_job(batch, sjb, job)
 
         return len(o)
 
-    def _load_build(self, batch, o):
+    def _load_job(self, batch, slave_jobs_batch, o):
         key = str(o['id'])
+
+        props = o.get('properties', {})
+        slavename = props.get('slavename')
+        if slavename:
+            slave_jobs_batch.insert(slavename, {
+                long(o['id']): key
+            })
 
         columns = {}
         for k, v in o.items():

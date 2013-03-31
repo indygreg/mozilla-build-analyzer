@@ -41,8 +41,8 @@ Cassandra. It will look something like::
 If you don't want to run Cassandra in the foreground, just leave off
 the *-f*.
 
-Running
-=======
+Populating Data
+===============
 
 Now that you have your environment configured and Cassandra running, you'll
 want to populate some data.
@@ -55,7 +55,7 @@ jobs that have executed. This data is stored in per-day archives on
 Mozilla servers, so we import by day::
 
     # Import all job data for March 28, 2013.
-    $ python bin/mbd.py load-job-data 2013-03-28
+    $ python bin/mbd.py load-job-data --day 2013-03-28
 
 Next, we can obtain the raw logs for each job. This allows us to perform
 deep analysis based on log content::
@@ -67,5 +67,20 @@ Importing logs takes a long time. And, it consumes a *lot* of internet
 bandwidth. But, the good news is you only need to do this once (at least
 once per job).
 
-Currently, that's all you can do. Useful features will come soon.
+*Currently we don't do anything with logs, so it's probably not worth it to
+fetch them yet.*
+
+Analyzing Data
+==============
+
+Run mbd.py with --help for a list of all the commands. Here are some::
+
+    # Print the names of slaves.
+    $ mbd slave-names
+
+    # Print jobs performed on a specific slave.
+    $ mbd slave-jobs bld-linux64-ec2-413
+
+    # Print a table listing total times slaves were running jobs.
+    # slave-efficiencies
 

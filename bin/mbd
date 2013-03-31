@@ -1,0 +1,155 @@
+# vim: set filetype=python:
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+from __future__ import unicode_literals
+
+import argparse
+import calendar
+import operator
+import sys
+import time
+
+from mozbuilddata.buildbotdata import DataLoader as BuildbotDataLoader
+from mozbuilddata.cassandra import Connection
+from mozbuilddata.jobs import JobExplorer
+
+
+class CLI(object):
+    def __init__(self, connection):
+        self.connection = connection
+
+    def load_job_data(self, day=None):
+        t = time.gmtime()
+        if day:
+            t = time.strptime(day, '%Y-%m-%d')
+
+        t = calendar.timegm(t)
+
+        loader = BuildbotDataLoader(self.connection.pool)
+        result = loader.load_builds_from_day(t)
+
+        print('Loaded %d slaves' % result['slave_count'])
+        print('Loaded %d masters' % result['master_count'])
+        print('Loaded %d builders' % result['builders_count'])
+        print('Loaded %d jobs' % result['build_count'])
+
+
+    def load_raw_logs(self):
+        loader = BuildbotDataLoader(self.connection.pool)
+        for msg in loader.load_missing_logs():
+            print(msg)
+
+    def slave_names(self):
+        names = set()
+        for name, slave_id in self.connection.slaves():
+            names.add(name)
+
+        print('\n'.join(sorted(names)))
+
+    def slave_jobs(self, slavename=None, print_id=False):
+        jobs = {}
+        for job_id, cols in self.connection.jobs_on_slave(slavename):
+            jobs[job_id] = cols
+
+        for k in sorted(jobs):
+            v = jobs[k]
+
+            if print_id:
+                print(k)
+                continue
+
+            print(k)
+            for prop in sorted(v):
+                print('\t%s\t%s' % (prop, v[prop]))
+
+    def slave_efficiencies(self):
+        slaves = sorted(t[0] for t in self.connection.slaves())
+
+        print('slave\ttotal time (s)\tused time (s)\tunused time (s)\t'
+            'efficiency')
+
+        for slave in slaves:
+            times = []
+
+            for job_id, info in self.connection.jobs_on_slave(slave):
+                times.append((int(info['starttime']), int(info['endtime'])))
+
+            if not times:
+                continue
+
+            times = sorted(times, key=operator.itemgetter(0))
+
+            earliest = times[0][0]
+            latest = times[-1][1]
+            total = latest - earliest
+            used = 0
+            unused = 0
+
+            last = earliest
+            for start, end in times:
+                unused = start - last
+                used += end - start
+                last = end
+
+            efficiency = float(used) / total * 100
+
+            print('%s\t%d\t%d\t%d\t%.1f' % (slave, total, used, unused,
+                efficiency))
+
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description='Do stuff with Mozilla build data.')
+
+    parser.add_argument('--host', default=['localhost'], nargs='*',
+        help='Cassandra host to connect to.')
+
+    parser.add_argument('--keyspace', default='mozbuilddata',
+        help='Cassandra keyspace to use for storage.')
+
+    subparsers = parser.add_subparsers()
+
+    ljd = subparsers.add_parser('load-job-data',
+        help='Load information about buildbot jobs into storage.')
+    ljd.add_argument('--day',
+        help='Day to load. Specified as a YYYY-MM-DD value.')
+    ljd.set_defaults(func='load_job_data')
+
+    ll = subparsers.add_parser('load-raw-logs',
+        help='Load raw job logs into storage.')
+    ll.set_defaults(func='load_raw_logs')
+
+    slave_names = subparsers.add_parser('slave-names',
+        help='Print the names of all slaves.')
+    slave_names.set_defaults(func='slave_names')
+
+    sj = subparsers.add_parser('slave-jobs',
+        help='Obtain information about jobs on a particular slave.')
+    sj.add_argument('--print-id', help='Just print the job ID',
+        action='store_true')
+    sj.add_argument('slavename',
+        help='The name of the slave whose info to view.')
+    sj.set_defaults(func='slave_jobs')
+
+    slave_efficiencies = subparsers.add_parser('slave-efficiencies',
+        help='Obtain information about the efficiency of all slaves.')
+    slave_efficiencies.set_defaults(func='slave_efficiencies')
+
+    args = parser.parse_args()
+
+    connection = Connection()
+    connection.connect(args.keyspace, servers=args.host)
+
+    global_arguments = ['host', 'keyspace', 'func']
+    relevant = {k: getattr(args, k) for k in vars(args) if k not in
+        global_arguments}
+
+    cli = CLI(connection)
+    getattr(cli, args.func)(**relevant)
+
+
+if __name__ == '__main__':
+    main()

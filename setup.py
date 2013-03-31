@@ -16,5 +16,6 @@ setup(
     license='MPL',
     packages=['mozbuilddata'],
     install_requires=['pycassa'],
+    scripts=['bin/mbd'],
 )
 
