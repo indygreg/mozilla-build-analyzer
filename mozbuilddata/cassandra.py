@@ -91,6 +91,12 @@ class Connection(object):
         self.pool = pycassa.pool.ConnectionPool(keyspace, server_list=servers,
             *args, **kwargs)
 
+    def builders(self):
+        """Obtain info about all builders."""
+        cf = ColumnFamily(self.pool, 'builders')
+        for key, cols in cf.get_range(columns=['category', 'master', 'name']):
+            yield key, cols['name'], cols['category'], cols['master']
+
     def slaves(self):
         """Obtain basic metadata about all slaves."""
 

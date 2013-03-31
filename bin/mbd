@@ -20,6 +20,12 @@ class CLI(object):
     def __init__(self, connection):
         self.connection = connection
 
+    def builder_names(self):
+        builders = self.connection.builders()
+
+        for name in sorted(set(t[1] for t in builders)):
+            print(name)
+
     def load_job_data(self, day_count=None, days=None):
         times = []
 
@@ -120,6 +126,10 @@ def main():
         help='Cassandra keyspace to use for storage.')
 
     subparsers = parser.add_subparsers()
+
+    builder_names = subparsers.add_parser('builder-names',
+        help='Print the names of all builders.')
+    builder_names.set_defaults(func='builder_names')
 
     ljd = subparsers.add_parser('load-job-data',
         help='Load information about buildbot jobs into storage.')
