@@ -26,6 +26,12 @@ class CLI(object):
         for name in sorted(set(t[1] for t in builders)):
             print(name)
 
+    def builder_categories(self):
+        builders = self.connection.builders()
+
+        for category in sorted(set(t[2] for t in builders)):
+            print(category)
+
     def load_job_data(self, day_count=None, days=None):
         times = []
 
@@ -130,6 +136,10 @@ def main():
     builder_names = subparsers.add_parser('builder-names',
         help='Print the names of all builders.')
     builder_names.set_defaults(func='builder_names')
+
+    builder_categories = subparsers.add_parser('builder-categories',
+        help='Print all the builder categories.')
+    builder_categories.set_defaults(func='builder_categories')
 
     ljd = subparsers.add_parser('load-job-data',
         help='Load information about buildbot jobs into storage.')
