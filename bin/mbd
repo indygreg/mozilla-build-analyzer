@@ -68,6 +68,9 @@ class CLI(object):
         for msg in loader.load_missing_logs(**kwargs):
             print(msg)
 
+    def log_cat(self, job_id):
+        print(self.connection.raw_log(job_id))
+
     def slave_names(self):
         names = set()
         for name, slave_id in self.connection.slaves():
@@ -168,6 +171,10 @@ def main():
         help='Only load loads for builders matching this pattern. The pattern '
             'is a UNIX shell glob style pattern match, performed without '
             'regard to character case.')
+
+    log_cat = subparsers.add_parser('log-cat', help='Print a raw job log.')
+    log_cat.set_defaults(func='log_cat')
+    log_cat.add_argument('job_id', help='The ID of the job whose log to print.')
 
     slave_names = subparsers.add_parser('slave-names',
         help='Print the names of all slaves.')

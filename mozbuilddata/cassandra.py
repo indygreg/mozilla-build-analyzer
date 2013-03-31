@@ -4,7 +4,10 @@
 
 from __future__ import unicode_literals
 
+import gzip
 import pycassa
+
+from StringIO import StringIO
 
 from pycassa.columnfamily import ColumnFamily
 
@@ -125,6 +128,21 @@ class Connection(object):
 
         for key, cols in result.items():
             yield key, cols
+
+    def raw_log(self, job_id):
+        """Obtain the raw log for a job from its ID."""
+        cf = ColumnFamily(self.pool, 'raw_job_logs')
+
+        try:
+            cols = cf.get(job_id)
+        except NotFoundException:
+            return None
+
+        # We store logs compressed, so uncompress it.
+        raw = StringIO(cols['log'])
+        gz = gzip.GzipFile(fileobj=raw)
+
+        return gz.read()
 
     @property
     def basic_job_columns(self):
