@@ -54,6 +54,9 @@ class CLI(object):
             for msg in loader.load_builds_from_day(t):
                 print(msg)
 
+    def build_metadata_truncate(self):
+        self.connection.truncate_build_metadata()
+
     def builder_names(self):
         builders = self.connection.builders()
 
@@ -175,6 +178,10 @@ def main():
     build_metadata_load.add_argument('--day-count', type=int,
         help='Number of previous days of data to import.')
     build_metadata_load.set_defaults(func='build_metadata_load')
+
+    build_metadata_truncate = subparsers.add_parser('build-metadata-truncate',
+        help='Truncate all build metadata (WARNING DELETES LOTS OF DATA)')
+    build_metadata_truncate.set_defaults(func='build_metadata_truncate')
 
     builder_names = subparsers.add_parser('builder-names',
         help='Print the names of all builders.')

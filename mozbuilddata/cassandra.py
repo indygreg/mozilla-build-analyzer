@@ -184,6 +184,16 @@ class Connection(object):
         except NotFoundException:
             return None
 
+    def truncate_build_metadata(self):
+        """Truncates all derived build metadata.
+
+        This bulk removes all build metadata and should not be performed
+        unless you want to reload all derived data!
+        """
+        for cf in ['slaves', 'slave_jobs', 'masters', 'builders', 'jobs']:
+            cf = ColumnFamily(self.pool, cf)
+            cf.truncate()
+
     def builders(self):
         """Obtain info about all builders."""
         cf = ColumnFamily(self.pool, 'builders')
