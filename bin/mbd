@@ -48,8 +48,8 @@ class CLI(object):
                 step.end - step.start,
                 step.name))
 
-    def jobs_with_category(self, category):
-        for key, cols in self.connection.jobs_with_category(category):
+    def jobs_in_category(self, category):
+        for key, cols in self.connection.jobs_in_category(category):
             print(key)
 
     def load_job_data(self, day_count=None, days=None):
@@ -175,10 +175,10 @@ def main():
     job_steps.set_defaults(func='job_steps')
     job_steps.add_argument('job_id', help='ID of the job to analyze.')
 
-    jobs_with_category = subparsers.add_parser('jobs-with-category',
+    jobs_in_category = subparsers.add_parser('jobs-with-category',
         help='List all the jobs belonging to a specified category.')
-    jobs_with_category.set_defaults(func='jobs_with_category')
-    jobs_with_category.add_argument('category', help='Category to filter on.')
+    jobs_in_category.set_defaults(func='jobs_in_category')
+    jobs_in_category.add_argument('category', help='Category to filter on.')
 
     ljd = subparsers.add_parser('load-job-data',
         help='Load information about buildbot jobs into storage.')

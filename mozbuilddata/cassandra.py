@@ -147,7 +147,7 @@ class Connection(object):
 
         return cols.values()
 
-    def jobs_with_category(self, category):
+    def jobs_in_category(self, category):
         """Obtain jobs having the specified category."""
         cf = ColumnFamily(self.pool, 'jobs')
 
