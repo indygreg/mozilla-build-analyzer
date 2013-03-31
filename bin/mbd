@@ -29,7 +29,7 @@ class CLI(object):
         for msg in loader.synchronize_build_files():
             print(msg)
 
-    def build_files_load(self, day_count=None, days=None):
+    def build_metadata_load(self, day_count=None, days=None):
         times = []
 
         if day_count and days:
@@ -168,13 +168,13 @@ def main():
         help='Synchronize our copy of the raw build files from server data.')
     build_files_synchronize.set_defaults(func='build_files_synchronize')
 
-    build_files_load = subparsers.add_parser('build-files-load',
+    build_metadata_load = subparsers.add_parser('build-metadata-load',
         help='Load information about buildbot jobs into storage.')
-    build_files_load.add_argument('--day', nargs='*', dest='days',
+    build_metadata_load.add_argument('--day', nargs='*', dest='days',
         help='Day to load. Specified as a YYYY-MM-DD value.')
-    build_files_load.add_argument('--day-count', type=int,
+    build_metadata_load.add_argument('--day-count', type=int,
         help='Number of previous days of data to import.')
-    build_files_load.set_defaults(func='build_files_load')
+    build_metadata_load.set_defaults(func='build_metadata_load')
 
     builder_names = subparsers.add_parser('builder-names',
         help='Print the names of all builders.')

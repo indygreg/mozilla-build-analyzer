@@ -73,7 +73,7 @@ Now that we have the raw data, we need extract metadata and import it into
 storage. Because this can take a while and because you may only be interested
 in certain days, you get to control which days to import::
 
-    $ mbd build-files-load --day 2013-03-27
+    $ mbd build-metadata-load --day 2013-03-27
 
 At this point, you have enough information in the system to perform data
 analysis! You can stop here or continue to import job logs.
