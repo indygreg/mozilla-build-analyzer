@@ -4,6 +4,7 @@
 
 from __future__ import unicode_literals
 
+import fnmatch
 import json
 import gzip
 import multiprocessing
@@ -85,17 +86,25 @@ class DataLoader(object):
         yield 'Loaded %d builders' % self.load_builders(obj['builders'])
         yield 'Loaded %d jobs' % self.load_builds(obj['builds'])
 
-    def load_missing_logs(self):
+    def load_missing_logs(self, builder_pattern=None):
         """Loads all logs that aren't currently in storage."""
         missing_urls = {}
 
         cf = ColumnFamily(self._pool, 'jobs')
-        for key, cols in cf.get_range(columns=['log_url', 'log_fetch_time']):
+        columns = ('buildername', 'log_url', 'log_fetch_time')
+        for key, cols in cf.get_range(columns=columns):
             if 'log_url' not in cols:
                 continue
 
-            if 'log_fetch_time' not in cols:
-                missing_urls[key] = cols['log_url']
+            if 'log_fetch_time' in cols:
+                continue
+
+            if builder_pattern and ('buildername' not in cols or \
+                not fnmatch.fnmatch(cols['buildername'].lower(),
+                    builder_pattern.lower())):
+                continue
+
+            missing_urls[key] = cols['log_url']
 
         yield '%d missing logs will be fetched.' % len(missing_urls)
         log_cf = ColumnFamily(self._pool, 'raw_job_logs')

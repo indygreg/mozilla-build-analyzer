@@ -45,9 +45,9 @@ class CLI(object):
             for msg in loader.load_builds_from_day(t):
                 print(msg)
 
-    def load_raw_logs(self):
+    def load_raw_logs(self, **kwargs):
         loader = BuildbotDataLoader(self.connection.pool)
-        for msg in loader.load_missing_logs():
+        for msg in loader.load_missing_logs(**kwargs):
             print(msg)
 
     def slave_names(self):
@@ -129,9 +129,13 @@ def main():
         help='Number of previous days of data to import.')
     ljd.set_defaults(func='load_job_data')
 
-    ll = subparsers.add_parser('load-raw-logs',
+    load_raw_logs = subparsers.add_parser('load-raw-logs',
         help='Load raw job logs into storage.')
-    ll.set_defaults(func='load_raw_logs')
+    load_raw_logs.set_defaults(func='load_raw_logs')
+    load_raw_logs.add_argument('--builder-pattern',
+        help='Only load loads for builders matching this pattern. The pattern '
+            'is a UNIX shell glob style pattern match, performed without '
+            'regard to character case.')
 
     slave_names = subparsers.add_parser('slave-names',
         help='Print the names of all slaves.')
