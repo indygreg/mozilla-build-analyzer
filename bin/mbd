@@ -97,10 +97,7 @@ class CLI(object):
         print(self.connection.raw_log(job_id))
 
     def slave_names(self):
-        names = set()
-        for name, slave_id in self.connection.slaves():
-            names.add(name)
-
+        names = set(t[1] for t in self.connection.slaves())
         print('\n'.join(sorted(names)))
 
     def slave_jobs(self, slavename=None, print_id=False):
@@ -120,7 +117,7 @@ class CLI(object):
                 print('\t%s\t%s' % (prop, v[prop]))
 
     def slave_efficiencies(self):
-        slaves = sorted(t[0] for t in self.connection.slaves())
+        slaves = sorted(t[1] for t in self.connection.slaves())
 
         print('slave\ttotal time (s)\tused time (s)\tunused time (s)\t'
             'efficiency')

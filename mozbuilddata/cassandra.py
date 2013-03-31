@@ -205,8 +205,8 @@ class Connection(object):
 
         cf = ColumnFamily(self.pool, 'slaves')
 
-        for key, cols in cf.get_range(columns=['id']):
-            yield key, cols['id']
+        for key, cols in cf.get_range(columns=['name']):
+            yield key, cols['name']
 
     def job_ids_on_slave(self, name):
         """Obtain all job IDs that were performed on named slave."""

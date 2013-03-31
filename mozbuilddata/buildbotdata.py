@@ -202,7 +202,7 @@ class DataLoader(object):
         batch = cf.batch()
 
         for slave_id, name in o.items():
-            batch.insert(name, {'id': slave_id})
+            batch.insert(slave_id, {'name': name})
 
         return len(o)
 
