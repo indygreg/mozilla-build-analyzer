@@ -13,12 +13,6 @@ from StringIO import StringIO
 
 from pycassa.columnfamily import ColumnFamily
 
-from pycassa.index import (
-    EQ,
-    create_index_clause,
-    create_index_expression,
-)
-
 from pycassa.system_manager import (
     BYTES_TYPE,
     KEYS_INDEX,
@@ -30,22 +24,16 @@ from pycassa import NotFoundException
 
 
 COLUMN_FAMILIES = {
-    'slaves': {
-        'comment': 'Holds information about slaves that run jobs.',
+    # We have a catch-all super column family for useful indices. Keys are
+    # the name of the index. Super columns are the thing being mapped from.
+    # Columns are what we are lists of things we are mapping to. Values
+    # are typically empty.
+    'indices': {
+        'comment': 'General bucket for useful indexes.',
+        'column_type': 'Super',
         'key_validation_class': 'UTF8Type',
         'comparator_type': UTF8_TYPE,
-        'default_validation_class': 'UTF8Type',
-    },
-    'slave_jobs': {
-        'comment': 'Maps slave names to job IDs.',
-        'key_validation_class': 'UTF8Type',
-        'comparator_type': LONG_TYPE,
-        'default_validation_class': 'UTF8Type',
-    },
-    'masters': {
-        'comment': 'Describes buildbot masters.',
-        'key_validation_class': 'UTF8Type',
-        'comparator_type': UTF8_TYPE,
+        'subcomparator': 'UTF8Type',
         'default_validation_class': 'UTF8Type',
     },
     'builders': {
@@ -54,17 +42,23 @@ COLUMN_FAMILIES = {
         'comparator_type': UTF8_TYPE,
         'default_validation_class': 'UTF8Type',
     },
-    'jobs': {
-        'comment': 'Information about individual build jobs.',
+    'builds': {
+        'comment': 'Holds information about specific build jobs.',
         'key_validation_class': 'UTF8Type',
         'comparator_type': UTF8_TYPE,
         'default_validation_class': 'UTF8Type',
     },
-    'raw_job_logs': {
-        'comment': 'Raw job logs.',
+    'slaves': {
+        'comment': 'Holds information about slaves that run jobs.',
         'key_validation_class': 'UTF8Type',
         'comparator_type': UTF8_TYPE,
-        'default_validation_class': 'BytesType',
+        'default_validation_class': 'UTF8Type',
+    },
+    'masters': {
+        'comment': 'Describes buildbot masters.',
+        'key_validation_class': 'UTF8Type',
+        'comparator_type': UTF8_TYPE,
+        'default_validation_class': 'UTF8Type',
     },
     'files': {
         'comment': 'Stores raw files.',
@@ -83,12 +77,6 @@ COLUMN_FAMILIES = {
 }
 
 COLUMN_TYPES = {}
-
-INDEXES = {
-    'jobs': {
-        'builder_category': ('UTF8Type', KEYS_INDEX, 'category_index'),
-    },
-}
 
 
 class Connection(object):
@@ -127,13 +115,6 @@ class Connection(object):
                     continue
 
                 manager.alter_column(keyspace, name, column, column_type)
-
-            for column, index in INDEXES.get(name, {}).items():
-                e = existing_metadata.get(column)
-                if e and hasattr(e, 'index_name'):
-                    continue
-
-                manager.create_index(keyspace, name, column, *index)
 
         self.pool = pycassa.pool.ConnectionPool(keyspace, server_list=servers,
             *args, **kwargs)
@@ -190,7 +171,7 @@ class Connection(object):
         This bulk removes all build metadata and should not be performed
         unless you want to reload all derived data!
         """
-        for cf in ['slaves', 'slave_jobs', 'masters', 'builders', 'jobs']:
+        for cf in ['slaves', 'masters', 'builders', 'builds']:
             cf = ColumnFamily(self.pool, cf)
             cf.truncate()
 
@@ -200,6 +181,19 @@ class Connection(object):
         for key, cols in cf.get_range(columns=['category', 'master', 'name']):
             yield key, cols['name'], cols['category'], cols['master']
 
+    def get_builder(self, builder_id):
+        """Obtain info about a builder from its ID."""
+        cf = ColumnFamily(self.pool, 'builders')
+        try:
+            return cf.get(builder_id)
+        except NotFoundException:
+            return None
+
+    def builder_ids_in_category(self, category):
+        cf = ColumnFamily(self.pool, 'indices')
+        return cf.get('builder_category_to_builder_ids',
+            super_column=category).keys()
+
     def slaves(self):
         """Obtain basic metadata about all slaves."""
 
@@ -208,34 +202,39 @@ class Connection(object):
         for key, cols in cf.get_range(columns=['name']):
             yield key, cols['name']
 
-    def job_ids_on_slave(self, name):
-        """Obtain all job IDs that were performed on named slave."""
-        cf = ColumnFamily(self.pool, 'slave_jobs')
+    def slave_id_from_name(self, name):
+        # TODO index.
+        for slave_id, slave_name in self.slaves():
+            if slave_name == name:
+                return slave_id
 
+        return None
+
+    def build_ids_on_slave(self, slave_id):
+        """Obtain all build IDs that were performed on the slave."""
+        cf = ColumnFamily(self.pool, 'indices')
         try:
-            cols = cf.get(name)
+            return cf.get('slave_id_to_build_ids',
+                super_column=slave_id).keys()
         except NotFoundException:
             return []
 
-        return cols.values()
+    def build_ids_in_category(self, category):
+        """Obtain build IDs having the specified category."""
+        cf = ColumnFamily(self.pool, 'indices')
+        try:
+            return cf.get('builder_category_to_build_ids',
+                super_column=category).keys()
+        except NotFoundException:
+            return []
 
-    def jobs_in_category(self, category):
-        """Obtain jobs having the specified category."""
-        cf = ColumnFamily(self.pool, 'jobs')
-
-        clause = self._column_equals_clause('builder_category', category)
-        for key, cols in cf.get_indexed_slices(clause):
-            yield key, cols
-
-    def jobs_on_slave(self, name):
-        """Obtain information about all jobs on a specific slave."""
-
-        ids = self.job_ids_on_slave(name)
-        cf = ColumnFamily(self.pool, 'jobs')
-        result = cf.multiget(ids)
-
-        for key, cols in result.items():
-            yield key, cols
+    def build_from_id(self, build_id):
+        """Obtain information about a build from its ID."""
+        cf = ColumnFamily(self.pool, 'builds')
+        try:
+            return cf.get(build_id)
+        except NotFoundException:
+            return None
 
     def raw_log(self, job_id):
         """Obtain the raw log for a job from its ID."""
@@ -252,6 +251,3 @@ class Connection(object):
 
         return gz.read()
 
-    def _column_equals_clause(self, column, value):
-        e = create_index_expression(column, value, EQ)
-        return create_index_clause([e])

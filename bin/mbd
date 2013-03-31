@@ -69,11 +69,14 @@ class CLI(object):
         for category in sorted(set(t[2] for t in builders)):
             print(category)
 
-    def builders_in_category(self, category):
-        builders = self.connection.builders()
+    def builders_in_category(self, category, print_name=False):
+        ids = self.connection.builder_ids_in_category(category)
 
-        for builder in sorted(set(t[1] for t in builders if t[2] == category)):
-            print(builder)
+        for builder_id in sorted(ids):
+            if print_name:
+                print(self.connection.get_builder(builder_id)['name'])
+            else:
+                print(builder_id)
 
     def job_steps(self, job_id):
         log = self.connection.raw_log(job_id)
@@ -84,9 +87,9 @@ class CLI(object):
                 step.end - step.start,
                 step.name))
 
-    def jobs_in_category(self, category):
-        for key, cols in self.connection.jobs_in_category(category):
-            print(key)
+    def builds_in_category(self, category):
+        for build_id in sorted(self.connection.build_ids_in_category(category)):
+            print(build_id)
 
     def load_raw_logs(self, **kwargs):
         loader = BuildbotDataLoader(self.connection)
@@ -100,32 +103,39 @@ class CLI(object):
         names = set(t[1] for t in self.connection.slaves())
         print('\n'.join(sorted(names)))
 
-    def slave_jobs(self, slavename=None, print_id=False):
-        jobs = {}
-        for job_id, cols in self.connection.jobs_on_slave(slavename):
-            jobs[job_id] = cols
+    def slave_builds(self, slavename=None, print_id=False):
+        slave_id = self.connection.slave_id_from_name(slavename)
+        if not slave_id:
+            print('Could not find slave: %s' % slavename)
+            return 1
 
-        for k in sorted(jobs):
-            v = jobs[k]
-
+        build_ids = self.connection.build_ids_on_slave(slave_id)
+        for build_id in sorted(build_ids):
             if print_id:
-                print(k)
+                print(build_id)
                 continue
 
-            print(k)
-            for prop in sorted(v):
-                print('\t%s\t%s' % (prop, v[prop]))
+            info = self.connection.build_from_id(build_id)
+
+            print(build_id)
+            for prop in sorted(info):
+                print('\t%s\t%s' % (prop, info[prop]))
 
     def slave_efficiencies(self):
-        slaves = sorted(t[1] for t in self.connection.slaves())
+        slaves = sorted((t[1], t[0]) for t in self.connection.slaves())
 
         print('slave\ttotal time (s)\tused time (s)\tunused time (s)\t'
             'efficiency')
 
-        for slave in slaves:
+        for slave_name, slave_id in slaves:
             times = []
 
-            for job_id, info in self.connection.jobs_on_slave(slave):
+            build_ids = self.connection.build_ids_on_slave(slave_id)
+            for build_id in sorted(build_ids):
+                info = self.connection.build_from_id(build_id)
+                if not info:
+                    continue
+
                 times.append((int(info['starttime']), int(info['endtime'])))
 
             if not times:
@@ -147,7 +157,7 @@ class CLI(object):
 
             efficiency = float(used) / total * 100
 
-            print('%s\t%d\t%d\t%d\t%.1f' % (slave, total, used, unused,
+            print('%s\t%d\t%d\t%d\t%.1f' % (slave_name, total, used, unused,
                 efficiency))
 
 
@@ -193,16 +203,18 @@ def main():
     builders_in_category.set_defaults(func='builders_in_category')
     builders_in_category.add_argument('category',
         help='The category to filter on.')
+    builders_in_category.add_argument('--print-name', action='store_true',
+        help='Whether to print the name of the builder instead of the ID.')
 
     job_steps = subparsers.add_parser('job-steps',
         help='Print info on all steps performed during a job.')
     job_steps.set_defaults(func='job_steps')
     job_steps.add_argument('job_id', help='ID of the job to analyze.')
 
-    jobs_in_category = subparsers.add_parser('jobs-with-category',
+    builds_in_category = subparsers.add_parser('builds-in-category',
         help='List all the jobs belonging to a specified category.')
-    jobs_in_category.set_defaults(func='jobs_in_category')
-    jobs_in_category.add_argument('category', help='Category to filter on.')
+    builds_in_category.set_defaults(func='builds_in_category')
+    builds_in_category.add_argument('category', help='Category to filter on.')
 
     load_raw_logs = subparsers.add_parser('load-raw-logs',
         help='Load raw job logs into storage.')
@@ -220,13 +232,13 @@ def main():
         help='Print the names of all slaves.')
     slave_names.set_defaults(func='slave_names')
 
-    sj = subparsers.add_parser('slave-jobs',
-        help='Obtain information about jobs on a particular slave.')
-    sj.add_argument('--print-id', help='Just print the job ID',
+    sj = subparsers.add_parser('slave-builds',
+        help='Obtain information about builds that ran on a particular slave.')
+    sj.add_argument('--print-id', help='Just print the build ID.',
         action='store_true')
     sj.add_argument('slavename',
         help='The name of the slave whose info to view.')
-    sj.set_defaults(func='slave_jobs')
+    sj.set_defaults(func='slave_builds')
 
     slave_efficiencies = subparsers.add_parser('slave-efficiencies',
         help='Obtain information about the efficiency of all slaves.')

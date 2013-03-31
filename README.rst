@@ -69,9 +69,26 @@ that can be loaded.
 Build Metadata
 --------------
 
-Build metadata is the most important data type. It defines the set of
-known job types (builders) that get run by Mozilla, the slaves
-(machines) they run on, and details for each invocation of those (jobs).
+Build metadata is the most important data type. It defines what things are
+built and details and how and when they are built. Build metadata consists
+of the following data types:
+
+builders
+    Describes a specific build configuration. e.g. *xpcshell tests on
+    mozilla-central on Windows 7 for opt builds* is a builder.
+
+builds
+    These are a specific invocation of a builder. These are arguably the
+    most important data type. Most of our data is stored against a
+    specific build instance.
+
+slaves
+    These are the machines that perform build jobs. There are over 1000
+    of them in Mozilla's network.
+
+masters
+    These coordinate what the slaves do. You don't need to be too concerned
+    with these.
 
 Build metadata is canonically defined by a bunch of JSON files sitting
 on a public HTTP server. The first step to loading build metadata is to
@@ -120,12 +137,15 @@ Analyzing Data
 
 Run mbd with --help for a list of all the commands. Here are some::
 
-    # Print the names of slaves.
+    # Print the names of all slaves.
     $ mbd slave-names
 
-    # Print jobs performed on a specific slave.
-    $ mbd slave-jobs bld-linux64-ec2-413
+    # Print builds performed on a specific slave.
+    $ mbd slave-builds bld-linux64-ec2-413
 
-    # Print a table listing total times slaves were running jobs.
-    # slave-efficiencies
+    # Print a table listing total times slaves were running builds.
+    $ mbd slave-efficiencies
+
+    # Print all the builders associated with a builder category.
+    $ mbd builders-in-category --print-name mozilla-central
 

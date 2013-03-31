@@ -169,7 +169,7 @@ class DataLoader(object):
         yield 'Loaded %d slaves' % self.load_slaves(obj['slaves'])
         yield 'Loaded %d masters' % self.load_masters(obj['masters'])
         yield 'Loaded %d builders' % self.load_builders(obj['builders'])
-        yield 'Loaded %d jobs' % self.load_builds(obj['builds'],
+        yield 'Loaded %d builds' % self.load_builds(obj['builds'],
             obj['builders'])
 
     def load_missing_logs(self, builder_pattern=None):
@@ -199,47 +199,47 @@ class DataLoader(object):
 
     def load_slaves(self, o):
         cf = ColumnFamily(self._pool, 'slaves')
-        batch = cf.batch()
-
-        for slave_id, name in o.items():
-            batch.insert(slave_id, {'name': name})
+        with cf.batch() as batch:
+            for slave_id, name in o.items():
+                batch.insert(slave_id, {'name': name})
 
         return len(o)
 
     def load_masters(self, o):
         cf = ColumnFamily(self._pool, 'masters')
-        batch = cf.batch()
 
-        for master_id, info in o.items():
-            key = info['name']
-            columns = {k: v for k, v in info.items() if k != 'name'}
-            columns['id'] = master_id
-
-            batch.insert(key, columns)
+        with cf.batch() as batch:
+            for master_id, info in o.items():
+                batch.insert(master_id, info)
 
         return len(o)
 
     def load_builds(self, o, builders):
-        cf = ColumnFamily(self._pool, 'jobs')
+        cf = ColumnFamily(self._pool, 'builds')
         batch = cf.batch()
 
-        slave_jobs = ColumnFamily(self._pool, 'slave_jobs')
-        sjb = slave_jobs.batch()
+        indices = ColumnFamily(self._pool, 'indices')
+        i_batch = indices.batch()
 
-        for job in o:
-            self._load_job(batch, sjb, job, builders)
+        for build in o:
+            self._load_build(batch, i_batch, build, builders)
+
+        batch.send()
+        i_batch.send()
 
         return len(o)
 
-    def _load_job(self, batch, slave_jobs_batch, o, builders):
+    def _load_build(self, batch, i_batch, o, builders):
         key = str(o['id'])
 
         props = o.get('properties', {})
-        slavename = props.get('slavename')
-        if slavename:
-            slave_jobs_batch.insert(slavename, {
-                long(o['id']): key
-            })
+        slave_id = unicode(o['slave_id'])
+        master_id = unicode(o['master_id'])
+        builder_id = unicode(o['builder_id'])
+
+        i_batch.insert('slave_id_to_build_ids', {slave_id: {key: ''}})
+        i_batch.insert('master_id_to_build_ids', {master_id: {key: ''}})
+        i_batch.insert('builder_id_build_ids', {builder_id: {key: ''}})
 
         columns = {}
         for k, v in o.items():
@@ -276,24 +276,42 @@ class DataLoader(object):
 
         builder_id = columns.get('builder_id')
         if builder_id and builder_id in builders:
-            columns['builder_category'] = builders[builder_id]['category']
-            columns['builder_name'] = builders[builder_id]['name']
+            builder = builders[builder_id]
+            columns['builder_category'] = builder['category']
+            columns['builder_name'] = builder['name']
+
+            i_batch.insert('builder_category_to_build_ids',
+                {builder['category']: {key: ''}})
 
         batch.insert(key, columns)
 
     def load_builders(self, o):
         cf = ColumnFamily(self._pool, 'builders')
+        indices = ColumnFamily(self._pool, 'indices')
+
         batch = cf.batch()
+        i_batch = indices.batch()
 
         for builder_id, params in o.items():
+            cat = params['category']
             columns = {
-                'category': params['category'],
+                'category': cat,
                 'master': unicode(params['master_id']),
                 'name': params['name'],
-                # TODO slaves
             }
 
             batch.insert(builder_id, columns)
+            i_batch.insert('builder_category_to_builder_ids',
+                {cat: {builder_id: ''}})
+            i_batch.insert('master_id_to_slave_ids', {columns['master']: {
+                builder_id: ''}})
+
+            if len(params['slaves']):
+                i_batch.insert('builder_id_to_slave_ids', {builder_id: {
+                    unicode(slave_id): '' for slave_id in params['slaves']}})
+
+        batch.send()
+        i_batch.send()
 
         return len(o)
 
