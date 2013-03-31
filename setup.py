@@ -15,7 +15,7 @@ setup(
     description='Fetch, store, and analyze information about Mozilla builds.',
     license='MPL',
     packages=['mozbuilddata'],
-    install_requires=['pycassa'],
+    install_requires=['pycassa', 'urllib3'],
     scripts=['bin/mbd'],
 )
 
