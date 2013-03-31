@@ -6,11 +6,17 @@ This project provides a mechanism for retrieving, storing, and analyzing
 data from automated builds conducted to build Firefox and other related
 Mozilla projects.
 
-This project currently focuses mostly on obtaining raw data, extracting
-useful information from it, and storing the results in a persistent data
-store. Data analysis can then be built off of stored data.
+The bulk of this project is a data store that is effectively a shadow-copy
+of build data which is canonically stored on Mozilla's servers. We use
+Cassandra as the storage backend. Only some analysis is provided. However,
+additional analysis can be facilitated by combing through the mountain of
+data collected.
 
-Configuration
+You can think of this project as a combination of the TBPL database,
+Mozilla's FTP server (which hosts the output of all jobs), and Datazilla
+(a database used to store Talos and other build job results).
+
+Initial Setup
 =============
 
 Once you've cloned the repository, you'll need to set up your run-time
@@ -41,8 +47,11 @@ Cassandra. It will look something like::
 If you don't want to run Cassandra in the foreground, just leave off
 the *-f*.
 
-Doing Stuff
-===========
+**At this time, it is highly recommended to use the local Cassandra instance
+instead of connecting to a production cluster.**
+
+Workflow
+========
 
 Now that you have your environment configured and Cassandra running, you'll
 want to populate some data.
@@ -53,40 +62,51 @@ that invokes sub commands (like *mach* if you are a Firefox developer).
 Populating Data
 ===============
 
-In order to do anything useful, you'll need to populate data. While there
-should be a single command to ensure all data is up to date, that doesn't
-exist yet. Until then, you'll have to use low-level commands.
+You need to explicitly tell your deployment which Mozilla build data to
+import. The sections below detail the different types of build data
+that can be loaded.
 
-The first thing you'll want to do is obtain the raw build metadata files
-from Mozilla. These files contain details about all the jobs that ran.
+Build Metadata
+--------------
 
-This data is always changing, so we offer a single command to synchronize
-the files with our local storage::
+Build metadata is the most important data type. It defines the set of
+known job types (builders) that get run by Mozilla, the slaves
+(machines) they run on, and details for each invocation of those (jobs).
+
+Build metadata is canonically defined by a bunch of JSON files sitting
+on a public HTTP server. The first step to loading build metadata is to
+synchronize these files with a local copy::
 
     $ mbd build-files-synchronize
 
 This will take a while to run initially because there are cumulatively many
-gigabytes of raw build data. If you don't feel like waiting around for all
-of them to download, just ctrl-c after you've fetched enough for your like!
+gigabytes of data. If you don't feel like waiting around for all of them to
+download, just ctrl-c after you've fetched enough!
 
-Now that we have the raw data, we need extract metadata and import it into
-storage. Because this can take a while and because you may only be interested
-in certain days, you get to control which days to import::
+Now that we have a copy of the raw build data, we need to extract the
+useful parts and load them into our local store.
 
-    $ mbd build-metadata-load --day 2013-03-27
+Here is how we load the last week of data::
 
-At this point, you have enough information in the system to perform data
-analysis! You can stop here or continue to import job logs.
+    $ mbd build-metadata-load --day-count 7
 
-The above has simply imported basic job metadata. This only tells a partial
-story. More information is available from the raw logs of each job. Because
-logs are quite large and you probably don't need all of them, you must
-manually import job logs.
+At this point, you can conduct analysis of build metadata!
 
-It's usually a good idea to limit job importing to jobs you care about. e.g.
-say you want to analyze xpcshell test logs::
+Remember, as time goes by, you'll need to continually refresh the build
+files and re-load build metadata!
 
-    $ python bin/mbd.py load-raw-logs --builder-pattern '*xpcshell*'
+Build Logs
+----------
+
+Build metadata can be supplemented with data parsed from the logs of
+individual jobs. Loading log data follows the same mechanism as build
+metadata.
+
+Because logs are quite large (tens of gigabytes) and since you are likely
+only interested in a subset of logs, it's usually a good idea to import
+only what you need. Here is how you would import just xpcshell test logs::
+
+    $ mbd load-raw-logs --builder-pattern '*xpcshell*'
 
 Importing logs takes a long time. And, it consumes a *lot* of internet
 bandwidth. But, the good news is you only need to do this once (at least
