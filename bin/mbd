@@ -24,9 +24,35 @@ class CLI(object):
     def __init__(self, connection):
         self.connection = connection
 
-    def available_build_files(self):
-        for path, t, size in available_build_files():
-            print('%s\t%d' % (path, size))
+    def build_files_synchronize(self):
+        loader = BuildbotDataLoader(self.connection)
+        for msg in loader.synchronize_build_files():
+            print(msg)
+
+    def build_files_load(self, day_count=None, days=None):
+        times = []
+
+        if day_count and days:
+            raise Exception('Can only specify 1 of day count or days.')
+
+        if day_count:
+            now = time.time()
+            # We don't do today because we likely don't have data yet.
+            for i in range(1, day_count + 1):
+                times.append(now - i * 86400)
+        else:
+            for day in days:
+                t = time.strptime(day, '%Y-%m-%d')
+                times.append(calendar.timegm(t))
+
+        if not times:
+            times.append(time.time())
+
+        loader = BuildbotDataLoader(self.connection)
+        for t in times:
+            print(time.strftime('Loading data for %Y-%m-%d', time.gmtime(t)))
+            for msg in loader.load_builds_from_day(t):
+                print(msg)
 
     def builder_names(self):
         builders = self.connection.builders()
@@ -59,33 +85,8 @@ class CLI(object):
         for key, cols in self.connection.jobs_in_category(category):
             print(key)
 
-    def load_job_data(self, day_count=None, days=None):
-        times = []
-
-        if day_count and days:
-            raise Exception('Can only specify 1 of day count or days.')
-
-        if day_count:
-            now = time.time()
-            # We don't do today because we likely don't have data yet.
-            for i in range(1, day_count + 1):
-                times.append(now - i * 86400)
-        else:
-            for day in days:
-                t = time.strptime(day, '%Y-%m-%d')
-                times.append(calendar.timegm(t))
-
-        if not times:
-            times.append(time.time())
-
-        loader = BuildbotDataLoader(self.connection.pool)
-        for t in times:
-            print(time.strftime('Loading data for %Y-%m-%d', time.gmtime(t)))
-            for msg in loader.load_builds_from_day(t):
-                print(msg)
-
     def load_raw_logs(self, **kwargs):
-        loader = BuildbotDataLoader(self.connection.pool)
+        loader = BuildbotDataLoader(self.connection)
         for msg in loader.load_missing_logs(**kwargs):
             print(msg)
 
@@ -163,9 +164,17 @@ def main():
 
     subparsers = parser.add_subparsers()
 
-    available_build_files = subparsers.add_parser('available-build-files',
-        help='Info on Mozilla-exposed build files.')
-    available_build_files.set_defaults(func='available_build_files')
+    build_files_synchronize = subparsers.add_parser('build-files-synchronize',
+        help='Synchronize our copy of the raw build files from server data.')
+    build_files_synchronize.set_defaults(func='build_files_synchronize')
+
+    build_files_load = subparsers.add_parser('build-files-load',
+        help='Load information about buildbot jobs into storage.')
+    build_files_load.add_argument('--day', nargs='*', dest='days',
+        help='Day to load. Specified as a YYYY-MM-DD value.')
+    build_files_load.add_argument('--day-count', type=int,
+        help='Number of previous days of data to import.')
+    build_files_load.set_defaults(func='build_files_load')
 
     builder_names = subparsers.add_parser('builder-names',
         help='Print the names of all builders.')
@@ -190,14 +199,6 @@ def main():
         help='List all the jobs belonging to a specified category.')
     jobs_in_category.set_defaults(func='jobs_in_category')
     jobs_in_category.add_argument('category', help='Category to filter on.')
-
-    ljd = subparsers.add_parser('load-job-data',
-        help='Load information about buildbot jobs into storage.')
-    ljd.add_argument('--day', nargs='*', dest='days',
-        help='Day to load. Specified as a YYYY-MM-DD value.')
-    ljd.add_argument('--day-count', type=int,
-        help='Number of previous days of data to import.')
-    ljd.set_defaults(func='load_job_data')
 
     load_raw_logs = subparsers.add_parser('load-raw-logs',
         help='Load raw job logs into storage.')

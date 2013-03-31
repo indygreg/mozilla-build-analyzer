@@ -5,6 +5,8 @@
 from __future__ import unicode_literals
 
 import gzip
+import hashlib
+
 import pycassa
 
 from StringIO import StringIO
@@ -64,6 +66,20 @@ COLUMN_FAMILIES = {
         'comparator_type': UTF8_TYPE,
         'default_validation_class': 'BytesType',
     },
+    'files': {
+        'comment': 'Stores raw files.',
+        'key_validation_class': 'UTF8Type',
+        'comparator_type': UTF8_TYPE,
+        'default_validation_class': 'BytesType',
+        'column_validation_classes': {
+            'storage_format': LONG_TYPE,
+            'compression': UTF8_TYPE,
+            'sha1': BYTES_TYPE,
+            'size': LONG_TYPE,
+            'mtime': LONG_TYPE,
+            'data': BYTES_TYPE,
+        },
+    },
 }
 
 COLUMN_TYPES = {}
@@ -121,6 +137,52 @@ class Connection(object):
 
         self.pool = pycassa.pool.ConnectionPool(keyspace, server_list=servers,
             *args, **kwargs)
+
+    def store_file(self, key, content, compression=None, mtime=-1):
+        cf = ColumnFamily(self.pool, 'files')
+        sha1 = hashlib.sha1()
+        sha1.update(content)
+
+        compression = compression or 'none'
+        assert compression in ('none', 'gzip', 'bzip')
+
+        cf.insert(key, {
+            'storage_format': 1,
+            'sha1': sha1.digest(),
+            'compression': compression,
+            'size': len(content),
+            'mtime': mtime,
+            'data': content,
+        })
+
+    def file_metadata(self, keys):
+        """Obtain metadata for a stored file.
+
+        Argument is an iterable of file keys whose data to obtain.
+        """
+        cf = ColumnFamily(self.pool, 'files')
+
+        result = cf.multiget(keys,
+            columns=['storage_format', 'sha1', 'compression', 'mtime', 'size'])
+
+        return result
+
+    def file_data(self, key):
+        cf = ColumnFamily(self.pool, 'files')
+
+        try:
+            columns = cf.get(key, columns=['data', 'compression'])
+            if columns['compression'] == 'none':
+                return columns['data']
+
+            if columns['compression'] == 'gzip':
+                s = StringIO(columns['data'])
+                return gzip.GzipFile(fileobj=s).read()
+
+            raise Exception('Unknown compression: %s' % columns['compression'])
+
+        except NotFoundException:
+            return None
 
     def builders(self):
         """Obtain info about all builders."""

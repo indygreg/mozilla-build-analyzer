@@ -7,6 +7,7 @@ from __future__ import unicode_literals
 import fnmatch
 import json
 import gzip
+import httplib
 import multiprocessing
 import re
 import time
@@ -21,6 +22,8 @@ from pycassa.columnfamily import ColumnFamily
 # want.
 BUILD_DATA_PREFIX = 'http://builddata.pub.build.mozilla.org/buildjson/'
 BUILD_DATA_URL = BUILD_DATA_PREFIX + 'builds-%Y-%m-%d.js.gz'
+BUILD_DATA_HOST = 'builddata.pub.build.mozilla.org'
+BUILD_DATA_PORT = 80
 
 RE_BUILD_LISTING_ENTRY = re.compile(r'''
     ^<a\shref="(?P<path>[^"]+)">[^<]+<\/a>
@@ -45,23 +48,12 @@ def available_build_files():
 
         d = match.groupdict()
 
+        if d['path'].endswith('.tmp'):
+            continue
+
         t = time.strptime(d['date'], '%d-%b-%Y %H:%M')
 
-        yield d['path'], t, int(d['size'])
-
-
-def get_daily_data(t=None):
-    """Fetch the build data for the day of the specified time.
-
-    Returns an object containing the raw JSON.
-    """
-
-    url = time.strftime(BUILD_DATA_URL, time.gmtime(t))
-    io = urllib2.urlopen(url)
-    s = StringIO(io.read())
-    io.close()
-
-    return json.load(gzip.GzipFile(fileobj=s), encoding='utf-8')
+        yield d['path'], time.mktime(t), int(d['size'])
 
 
 def fetch_log(params):
@@ -100,14 +92,80 @@ def fetch_logs(cf, log_cf, urls):
 class DataLoader(object):
     """Load buildbot data into Cassandra."""
 
-    def __init__(self, pool):
+    def __init__(self, connection):
         """Instantiate against a Cassandra Connection Pool."""
 
-        self._pool = pool
+        self._connection = connection
+        self._pool = connection.pool
+
+    def synchronize_build_files(self):
+        """Synchronize our set of raw build files with what's on the server."""
+        server_files = {BUILD_DATA_PREFIX + t[0]: (t[1], t[2])
+            for t in available_build_files()}
+
+        existing = {}
+        for url in server_files:
+            existing.update(self._connection.file_metadata([url]))
+        populate = set()
+
+        for url in server_files:
+            if url not in existing:
+                populate.add(url)
+                continue
+
+            local_meta = existing[url]
+            server_meta = server_files[url]
+
+            if local_meta['mtime'] < server_meta[0]:
+                yield 'Will refresh %s because newer mtime on server' % url
+                populate.add(url)
+                continue
+
+            if local_meta['size'] != server_meta[1]:
+                yield 'Will refresh %s because size changed' % url
+                populate.add(url)
+                continue
+
+        # We reuse the connection take advantage of slow start, etc.
+        conn = httplib.HTTPConnection(BUILD_DATA_HOST, BUILD_DATA_PORT)
+
+        for url in sorted(populate, reverse=True):
+            yield 'Adding %s' % url
+            conn.request('GET', url)
+            response = conn.getresponse()
+            if response.status != 200:
+                raise Exception('Error fetching %s: %d' % (url,
+                    response.status))
+
+            data = response.read()
+            compression = None
+            if url.endswith('.gz'):
+                compression = 'gzip'
+
+            self._connection.store_file(url, data, mtime=server_files[url][0],
+                compression=compression)
+
+    def load_build_metadata(self, url):
+        """Loads build metadata from JSON in a URL."""
+        file_info = self._connection.file_metadata([url])
+
+        if url not in file_info:
+            raise Exception('Build file does not exist in local storage: %s' %
+                url)
+
+        file_info = file_info[url]
+        raw = self._connection.file_data(url)
+        if not raw:
+            raise Exception('No data appears to be stored: %s' % url)
+
+        obj = json.loads(raw, encoding='utf-8')
+        return self.load_builds_json(obj)
 
     def load_builds_from_day(self, t):
-        obj = get_daily_data(t)
+        url = time.strftime(BUILD_DATA_URL, time.gmtime(t))
+        return self.load_build_metadata(url)
 
+    def load_builds_json(self, obj):
         yield 'Loaded %d slaves' % self.load_slaves(obj['slaves'])
         yield 'Loaded %d masters' % self.load_masters(obj['masters'])
         yield 'Loaded %d builders' % self.load_builders(obj['builders'])
