@@ -13,6 +13,7 @@ import time
 
 from mozbuilddata.buildbotdata import DataLoader as BuildbotDataLoader
 from mozbuilddata.cassandra import Connection
+from mozbuilddata.logparser.jobparser import parse_job_log
 from mozbuilddata.jobs import JobExplorer
 
 
@@ -37,6 +38,15 @@ class CLI(object):
 
         for builder in sorted(set(t[1] for t in builders if t[2] == category)):
             print(builder)
+
+    def job_steps(self, job_id):
+        log = self.connection.raw_log(job_id)
+        parsed = parse_job_log(log)
+        for step in parsed.steps:
+            print('%s %s %s %s' % (
+                step.start.isoformat(), step.end.isoformat(),
+                step.end - step.start,
+                step.name))
 
     def load_job_data(self, day_count=None, days=None):
         times = []
@@ -155,6 +165,11 @@ def main():
     builders_in_category.set_defaults(func='builders_in_category')
     builders_in_category.add_argument('category',
         help='The category to filter on.')
+
+    job_steps = subparsers.add_parser('job-steps',
+        help='Print info on all steps performed during a job.')
+    job_steps.set_defaults(func='job_steps')
+    job_steps.add_argument('job_id', help='ID of the job to analyze.')
 
     ljd = subparsers.add_parser('load-job-data',
         help='Load information about buildbot jobs into storage.')
