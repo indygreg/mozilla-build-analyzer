@@ -79,12 +79,11 @@ class DataLoader(object):
     def load_builds_from_day(self, t):
         obj = get_daily_data(t)
 
-        result = {}
-
         yield 'Loaded %d slaves' % self.load_slaves(obj['slaves'])
         yield 'Loaded %d masters' % self.load_masters(obj['masters'])
         yield 'Loaded %d builders' % self.load_builders(obj['builders'])
-        yield 'Loaded %d jobs' % self.load_builds(obj['builds'])
+        yield 'Loaded %d jobs' % self.load_builds(obj['builds'],
+            obj['builders'])
 
     def load_missing_logs(self, builder_pattern=None):
         """Loads all logs that aren't currently in storage."""
@@ -133,7 +132,7 @@ class DataLoader(object):
 
         return len(o)
 
-    def load_builds(self, o):
+    def load_builds(self, o, builders):
         cf = ColumnFamily(self._pool, 'jobs')
         batch = cf.batch()
 
@@ -141,11 +140,11 @@ class DataLoader(object):
         sjb = slave_jobs.batch()
 
         for job in o:
-            self._load_job(batch, sjb, job)
+            self._load_job(batch, sjb, job, builders)
 
         return len(o)
 
-    def _load_job(self, batch, slave_jobs_batch, o):
+    def _load_job(self, batch, slave_jobs_batch, o, builders):
         key = str(o['id'])
 
         props = o.get('properties', {})
@@ -187,6 +186,11 @@ class DataLoader(object):
                 continue
 
             raise Exception('Unknown non-simple field: %s %s' % (k, v))
+
+        builder_id = columns.get('builder_id')
+        if builder_id and builder_id in builders:
+            columns['builder_category'] = builders[builder_id]['category']
+            columns['builder_name'] = builders[builder_id]['name']
 
         batch.insert(key, columns)
 
