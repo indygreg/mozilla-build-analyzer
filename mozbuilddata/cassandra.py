@@ -191,8 +191,8 @@ class Connection(object):
 
     def builder_ids_in_category(self, category):
         cf = ColumnFamily(self.pool, 'indices')
-        return cf.get('builder_category_to_builder_ids',
-            super_column=category).keys()
+        return self._all_columns_in_supercolumn_column(cf,
+            'builder_category_to_builder_ids', category)
 
     def slaves(self):
         """Obtain basic metadata about all slaves."""
@@ -213,20 +213,19 @@ class Connection(object):
     def build_ids_on_slave(self, slave_id):
         """Obtain all build IDs that were performed on the slave."""
         cf = ColumnFamily(self.pool, 'indices')
-        try:
-            return cf.get('slave_id_to_build_ids',
-                super_column=slave_id).keys()
-        except NotFoundException:
-            return []
+        return self._all_columns_in_supercolumn_column(cf,
+            'slave_id_to_build_ids', slave_id)
 
     def build_ids_in_category(self, category):
         """Obtain build IDs having the specified category."""
         cf = ColumnFamily(self.pool, 'indices')
-        try:
-            return cf.get('builder_category_to_build_ids',
-                super_column=category).keys()
-        except NotFoundException:
-            return []
+        return self._all_columns_in_supercolumn_column(cf,
+            'builder_category_to_build_ids', category)
+
+    def build_ids_with_builder_name(self, builder_name):
+        cf = ColumnFamily(self.pool, 'indices')
+        return self._all_columns_in_supercolumn_column(cf,
+            'builder_name_to_build_ids', builder_name)
 
     def build_from_id(self, build_id):
         """Obtain information about a build from its ID."""
@@ -250,4 +249,23 @@ class Connection(object):
         gz = gzip.GzipFile(fileobj=raw)
 
         return gz.read()
+
+    def _all_columns_in_supercolumn_column(self, cf, key, column):
+        """Generator for the names of all columns in a supercolumn column."""
+
+        try:
+            start_column =''
+            while True:
+                result = cf.get(key, column_start=start_column, column_finish='',
+                    super_column=column, column_count=1000)
+
+                for column_name in result.keys():
+                    yield column_name
+                    start_column = column_name
+
+                if len(result) != 1000:
+                    break
+
+        except NotFoundException:
+            pass
 
