@@ -18,6 +18,7 @@ from collections import (
 RE_HEADER_METADATA = re.compile('^(?P<key>[a-z]+): (?P<value>.*)$')
 STARTED = b'========= Started'
 FINISHED = b'========= Finished'
+SKIPPED = b'========= Skipped  (results: not started, elapsed: not started) ========='
 
 ELAPSED = r'''
     (?:(?P<elapsed_hours>\d+)\shrs,\s)?
@@ -44,8 +45,7 @@ class ParsedLog(object):
     def __init__(self):
         self.metadata = {}
         self.steps = []
-
-        self._in_step = False
+        self.skipped = 0
 
 
 def parse_job_log(log):
@@ -126,6 +126,10 @@ def parse_job_log(log):
 
             step_lines = []
             current_step = None
+            continue
+
+        if line == SKIPPED:
+            parsed.skipped += 1
             continue
 
         if current_step:
