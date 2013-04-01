@@ -5,6 +5,7 @@
 from __future__ import unicode_literals
 
 import calendar
+import datetime
 import fnmatch
 import json
 import gzip
@@ -241,19 +242,23 @@ class DataLoader(object):
 
         indices = ColumnFamily(self._pool, 'indices')
         i_batch = indices.batch()
+        counters = ColumnFamily(self._pool, 'counters')
+        super_counters = ColumnFamily(self._pool, 'super_counters')
 
         existing_filenames = set(self._connection.filenames())
 
         for build in o:
-            self._load_build(batch, i_batch, build, builders,
-                existing_filenames)
+            self._load_build(batch, i_batch, counters, super_counters,
+                build, builders, existing_filenames)
 
         batch.send()
         i_batch.send()
 
         return len(o)
 
-    def _load_build(self, batch, i_batch, o, builders, existing_filenames):
+    def _load_build(self, batch, i_batch, counters, super_counters, o,
+        builders, existing_filenames):
+
         key = str(o['id'])
 
         props = o.get('properties', {})
@@ -264,6 +269,8 @@ class DataLoader(object):
         i_batch.insert('slave_id_to_build_ids', {slave_id: {key: ''}})
         i_batch.insert('master_id_to_build_ids', {master_id: {key: ''}})
         i_batch.insert('builder_id_to_build_ids', {builder_id: {key: ''}})
+
+        elapsed = o['endtime'] - o['starttime']
 
         columns = {}
         for k, v in o.items():
@@ -310,13 +317,28 @@ class DataLoader(object):
         builder_id = columns.get('builder_id')
         if builder_id and builder_id in builders:
             builder = builders[builder_id]
-            columns['builder_category'] = builder['category']
-            columns['builder_name'] = builder['name']
+            name, cat  = builder['name'], builder['category']
+            columns['builder_category'] = cat
+            columns['builder_name'] = name
 
-            i_batch.insert('builder_category_to_build_ids',
-                {builder['category']: {key: ''}})
-            i_batch.insert('builder_name_to_build_ids',
-                {builder['name']: {key: ''}})
+            i_batch.insert('builder_category_to_build_ids', {cat: {key: ''}})
+            i_batch.insert('builder_name_to_build_ids', {name: {key: ''}})
+
+            counters.add('builder_number', name, 1)
+            counters.add('builder_duration', name, elapsed)
+
+            day = datetime.date.fromtimestamp(o['starttime']).isoformat()
+            super_counters.add('builder_number_by_day', name, 1, day)
+            super_counters.add('builder_duration_by_day', name, elapsed, day)
+            super_counters.add('builder_number_by_category', name, 1, cat)
+            super_counters.add('builder_duration_by_category', name, elapsed,
+                cat)
+
+            day_cat = '%s.%s' % (day, cat)
+            super_counters.add('builder_number_by_day_and_category', name,
+                1, day_cat)
+            super_counters.add('builder_duration_by_day_and_category', name,
+                elapsed, day_cat)
 
         batch.insert(key, columns)
 

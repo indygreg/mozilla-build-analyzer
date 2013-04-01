@@ -120,6 +120,20 @@ BUILD_METADATA_INDICES = [
     'slave_id_to_build_ids',
 ]
 
+BUILD_METADATA_COUNTERS = [
+    'builder_number',
+    'builder_duration',
+]
+
+BUILD_METADATA_SUPER_COUNTERS = [
+    'builder_number_by_day',
+    'builder_duration_by_day',
+    'builder_number_by_category',
+    'builder_duration_by_category',
+    'builder_number_by_day_and_category',
+    'builder_duration_by_day_and_category',
+]
+
 LOG_METADATA_INDICES = [
     'build_step_name_to_build_ids',
 ]
@@ -245,6 +259,14 @@ class Connection(object):
 
         cf = ColumnFamily(self.pool, 'indices')
         for key in BUILD_METADATA_INDICES:
+            cf.remove(key)
+
+        cf = ColumnFamily(self.pool, 'counters')
+        for key in BUILD_METADATA_COUNTERS:
+            cf.remove(key)
+
+        cf = ColumnFamily(self.pool, 'super_counters')
+        for key in BUILD_METADATA_SUPER_COUNTERS:
             cf.remove(key)
 
     def truncate_log_metadata(self):
