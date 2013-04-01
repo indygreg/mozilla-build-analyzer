@@ -50,7 +50,7 @@ class ParsedLog(object):
         self.skipped = 0
 
 
-def parse_job_log(log):
+def parse_build_log(log):
     lines = deque(log.splitlines())
 
     parsed = ParsedLog()

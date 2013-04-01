@@ -24,24 +24,6 @@ from pycassa import NotFoundException
 
 
 COLUMN_FAMILIES = {
-    # We have a catch-all super column family for useful indices. Keys are
-    # the name of the index. Super columns are the thing being mapped from.
-    # Columns are what we are lists of things we are mapping to. Values
-    # are typically empty.
-    'indices': {
-        'comment': 'General bucket for useful indexes.',
-        'column_type': 'Super',
-        'key_validation_class': 'UTF8Type',
-        'comparator_type': UTF8_TYPE,
-        'subcomparator': 'UTF8Type',
-        'default_validation_class': 'UTF8Type',
-    },
-    'simple_indices': {
-        'comment': 'Version of indices with a regular column family.',
-        'key_validation_class': 'UTF8Type',
-        'comparator_type': UTF8_TYPE,
-        'default_validation_class': 'UTF8Type',
-    },
     'builders': {
         'comment': 'Information about different job types (builders).',
         'key_validation_class': 'UTF8Type',
@@ -80,6 +62,49 @@ COLUMN_FAMILIES = {
             'data': BYTES_TYPE,
         },
     },
+
+    # Derived data.
+
+    # We have a catch-all super column family for useful indices. Keys are
+    # the name of the index. Super columns are the thing being mapped from.
+    # Columns are what we are lists of things we are mapping to. Values
+    # are typically empty.
+    'indices': {
+        'comment': 'General bucket for useful indexes.',
+        'column_type': 'Super',
+        'key_validation_class': 'UTF8Type',
+        'comparator_type': UTF8_TYPE,
+        'subcomparator_type': UTF8_TYPE,
+        'default_validation_class': 'UTF8Type',
+    },
+    'simple_indices': {
+        'comment': 'Version of indices with a regular column family.',
+        'key_validation_class': 'UTF8Type',
+        'comparator_type': UTF8_TYPE,
+        'default_validation_class': 'UTF8Type',
+    },
+    'counters': {
+        'comment': 'Holds counters in a regular column family.',
+        'key_validation_class': 'UTF8Type',
+        'comparator_type': UTF8_TYPE,
+        'default_validation_class': 'CounterColumnType',
+    },
+    'super_counters': {
+        'comment': 'Holds counters in a super column family.',
+        'column_type': 'Super',
+        'key_validation_class': 'UTF8Type',
+        'comparator_type': UTF8_TYPE,
+        'subcomparator_type': UTF8_TYPE,
+        'default_validation_class': 'CounterColumnType',
+    },
+    'build_timelines': {
+        'comment': 'Records information about various phases of builds.',
+        'column_type': 'Super',
+        'key_validation_class': 'UTF8Type',
+        'comparator_type': LONG_TYPE,
+        'subcomparator_type': UTF8_TYPE,
+        'default_validation_class': 'UTF8Type',
+    },
 }
 
 COLUMN_TYPES = {}
@@ -93,6 +118,24 @@ BUILD_METADATA_INDICES = [
     'master_id_to_build_ids',
     'master_id_to_slave_ids',
     'slave_id_to_build_ids',
+]
+
+LOG_METADATA_INDICES = [
+    'build_step_name_to_build_ids',
+]
+
+LOG_METADATA_COUNTERS = [
+    'build_step_number',
+    'build_step_duration',
+]
+
+LOG_METADATA_SUPER_COUNTERS = [
+    'build_step_number_by_category',
+    'build_step_duration_by_category',
+    'build_step_number_by_day',
+    'build_step_duration_by_day',
+    'build_step_number_by_day_and_category',
+    'build_step_duration_by_day_and_category',
 ]
 
 class Connection(object):
@@ -203,6 +246,34 @@ class Connection(object):
         cf = ColumnFamily(self.pool, 'indices')
         for key in BUILD_METADATA_INDICES:
             cf.remove(key)
+
+    def truncate_log_metadata(self):
+        for cf in ['build_timelines']:
+            cf = ColumnFamily(self.pool, cf)
+            cf.truncate()
+
+        cf = ColumnFamily(self.pool, 'indices')
+        for key in LOG_METADATA_INDICES:
+            cf.remove(key)
+
+        cf = ColumnFamily(self.pool, 'counters')
+        for key in LOG_METADATA_COUNTERS:
+            cf.remove(key)
+
+        cf = ColumnFamily(self.pool, 'super_counters')
+        for key in LOG_METADATA_SUPER_COUNTERS:
+            cf.remove(key)
+
+        cf = ColumnFamily(self.pool, 'builds')
+        batch = cf.batch()
+        # Remove log parsing state from builds.
+        for key, cols in cf.get_range(columns=['log_parsing_version']):
+            if 'log_parsing_version' not in cols:
+                continue
+
+            batch.remove(key, ['log_parsing_version'])
+
+        batch.send()
 
     def builders(self):
         """Obtain info about all builders."""

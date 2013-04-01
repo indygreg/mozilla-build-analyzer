@@ -17,7 +17,7 @@ from mozbuilddata.buildbotdata import (
     available_build_files,
 )
 from mozbuilddata.cassandra import Connection
-from mozbuilddata.logparser.jobparser import parse_job_log
+from mozbuilddata.logparser.jobparser import parse_build_log
 
 
 class CLI(object):
@@ -116,7 +116,7 @@ class CLI(object):
             if not log:
                 continue
 
-            parsed = parse_job_log(log)
+            parsed = parse_build_log(log)
             for step in parsed.steps:
                 print('%s %s %s %s' % (
                     step.start.isoformat(), step.end.isoformat(),
@@ -148,6 +148,14 @@ class CLI(object):
     def log_cat(self, build_id):
         for bid in build_id:
             print(self.connection.build_log(bid))
+
+    def log_load(self, build_id):
+        loader = BuildbotDataLoader(self.connection)
+        for msg in loader.parse_logs(build_id):
+            print(msg)
+
+    def log_data_truncate(self):
+        self.connection.truncate_log_metadata()
 
     def slave_names(self):
         names = set(t[1] for t in self.connection.slaves())
@@ -301,6 +309,17 @@ def main():
     log_cat.set_defaults(func='log_cat')
     log_cat.add_argument('build_id', nargs='+',
         help='The ID of the build whose log to print.')
+
+    log_load = subparsers.add_parser('log-load',
+        help='Parse logs and load derived data into storage.')
+    log_load.set_defaults(func='log_load')
+    log_load.add_argument('build_id', nargs='*',
+        help='Build IDs whose logs to parse and load.')
+
+    log_data_truncate = subparsers.add_parser('log-data-truncate',
+        help='Truncate data derived from parsing logs. WARNING THIS DELETES '
+            'DATA!')
+    log_data_truncate.set_defaults(func='log_data_truncate')
 
     slave_names = subparsers.add_parser('slave-names',
         help='Print the names of all slaves.')
