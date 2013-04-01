@@ -27,7 +27,9 @@ ELAPSED = r'''
     '''
 
 STEP_COMMON = r'''
-    (?P<name>.*)\s\(
+    '?(?P<name>[^']+)'?\s
+    (?P<special>(?:exception|warnings|failed|interrupted))?\s?
+    \(
     results:\s(?P<results>\d+),\s
     elapsed:\s''' + ELAPSED + '''\)\s
     \(at\s(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})\s
@@ -38,7 +40,7 @@ RE_STARTED = re.compile('^=========\sStarted\s' + STEP_COMMON, re.VERBOSE)
 RE_FINISHED = re.compile('^=========\sFinished\s' + STEP_COMMON, re.VERBOSE)
 
 
-Step = namedtuple('Step', ('name', 'results', 'elapsed', 'start', 'end', 'lines'))
+Step = namedtuple('Step', ('name', 'state', 'results', 'elapsed', 'start', 'end', 'lines'))
 
 
 class ParsedLog(object):
@@ -121,8 +123,10 @@ def parse_job_log(log):
             start = match_to_datetime(current_step)
             end = match_to_datetime(g)
 
-            parsed.steps.append(Step(g['name'], g['results'], elapsed_seconds,
-                start, end, step_lines))
+            state = g['special'] or 'success'
+
+            parsed.steps.append(Step(g['name'], state, g['results'],
+                elapsed_seconds, start, end, step_lines))
 
             step_lines = []
             current_step = None
