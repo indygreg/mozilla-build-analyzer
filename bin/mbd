@@ -282,7 +282,10 @@ def main():
         global_arguments}
 
     cli = CLI(connection)
-    getattr(cli, args.func)(**relevant)
+    try:
+        getattr(cli, args.func)(**relevant)
+    except KeyboardInterrupt:
+        sys.exit(1)
 
 
 if __name__ == '__main__':
