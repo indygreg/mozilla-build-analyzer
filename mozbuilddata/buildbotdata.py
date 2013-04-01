@@ -7,6 +7,7 @@ from __future__ import unicode_literals
 import fnmatch
 import json
 import gzip
+import httplib
 import re
 import time
 import urllib2
@@ -280,6 +281,12 @@ class DataLoader(object):
                 continue
 
             raise Exception('Unknown non-simple field: %s %s' % (k, v))
+
+        # Look for existing log.
+        if 'log_url' in columns:
+            file_meta = self._connection.file_metadata(columns['log_url'])
+            if file_meta:
+                columns['log_fetch_time'] = unicode(file_meta['mtime'])
 
         builder_id = columns.get('builder_id')
         if builder_id and builder_id in builders:

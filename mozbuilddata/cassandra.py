@@ -171,7 +171,7 @@ class Connection(object):
         This bulk removes all build metadata and should not be performed
         unless you want to reload all derived data!
         """
-        for cf in ['slaves', 'masters', 'builders', 'builds']:
+        for cf in ['slaves', 'masters', 'builders', 'builds', 'indices']:
             cf = ColumnFamily(self.pool, cf)
             cf.truncate()
 
