@@ -111,13 +111,17 @@ class CLI(object):
             print('')
 
     def build_steps(self, build_id):
-        log = self.connection.build_log(build_id)
-        parsed = parse_job_log(log)
-        for step in parsed.steps:
-            print('%s %s %s %s' % (
-                step.start.isoformat(), step.end.isoformat(),
-                step.end - step.start,
-                step.name))
+        for bid in build_id:
+            log = self.connection.build_log(bid)
+            if not log:
+                continue
+
+            parsed = parse_job_log(log)
+            for step in parsed.steps:
+                print('%s %s %s %s' % (
+                    step.start.isoformat(), step.end.isoformat(),
+                    step.end - step.start,
+                    step.name))
 
     def builds_in_category(self, category):
         for build_id in sorted(self.connection.build_ids_in_category(category)):
@@ -263,7 +267,8 @@ def main():
     build_steps = subparsers.add_parser('build-steps',
         help='Print info on all steps performed during a build.')
     build_steps.set_defaults(func='build_steps')
-    build_steps.add_argument('build_id', help='ID of the build to analyze.')
+    build_steps.add_argument('build_id', nargs='+',
+        help='ID of the build to analyze.')
 
     builds_in_category = subparsers.add_parser('builds-in-category',
         help='List all the builds belonging to a specified category.')
