@@ -14,6 +14,7 @@ import re
 import time
 import urllib2
 
+from collections import Counter
 from StringIO import StringIO
 
 from pycassa.batch import Mutator
@@ -242,22 +243,49 @@ class DataLoader(object):
 
         indices = ColumnFamily(self._pool, 'indices')
         i_batch = indices.batch()
-        counters = ColumnFamily(self._pool, 'counters')
-        super_counters = ColumnFamily(self._pool, 'super_counters')
+
+        # We defer counter inserts until then end because Python
+        # increments are cheaper than Cassandra increments (hopefully).
+        counters = {
+            'builder_number': Counter(),
+            'builder_duration': Counter(),
+            'builder_number_by_day': {},
+            'builder_duration_by_day': {},
+            'builder_number_by_category': {},
+            'builder_duration_by_category': {},
+            'builder_number_by_day_and_category': {},
+            'builder_duration_by_day_and_category': {},
+        }
 
         existing_filenames = set(self._connection.filenames())
 
         for build in o:
-            self._load_build(batch, i_batch, counters, super_counters,
-                build, builders, existing_filenames)
+            self._load_build(batch, i_batch, counters, build, builders,
+                existing_filenames)
 
         batch.send()
         i_batch.send()
 
+        cf = ColumnFamily(self._pool, 'counters')
+        for builder, count in counters['builder_number'].items():
+            cf.add('builder_number', builder, count)
+
+        for builder, count in counters['builder_duration'].items():
+            cf.add('builder_duration', builder, count)
+
+        cf = ColumnFamily(self._pool, 'super_counters')
+        del counters['builder_number']
+        del counters['builder_duration']
+
+        for key, super_columns in counters.items():
+            for super_column, counts in super_columns.items():
+                for column, count in counts.items():
+                    cf.add(key, column, count, super_column)
+
         return len(o)
 
-    def _load_build(self, batch, i_batch, counters, super_counters, o,
-        builders, existing_filenames):
+    def _load_build(self, batch, i_batch, counters, o, builders,
+        existing_filenames):
 
         key = str(o['id'])
 
@@ -324,21 +352,25 @@ class DataLoader(object):
             i_batch.insert('builder_category_to_build_ids', {cat: {key: ''}})
             i_batch.insert('builder_name_to_build_ids', {name: {key: ''}})
 
-            counters.add('builder_number', name, 1)
-            counters.add('builder_duration', name, elapsed)
+            counters['builder_number'].update([name])
+            counters['builder_duration'][name] += elapsed
 
             day = datetime.date.fromtimestamp(o['starttime']).isoformat()
-            super_counters.add('builder_number_by_day', name, 1, day)
-            super_counters.add('builder_duration_by_day', name, elapsed, day)
-            super_counters.add('builder_number_by_category', name, 1, cat)
-            super_counters.add('builder_duration_by_category', name, elapsed,
-                cat)
+            counters['builder_number_by_day'].setdefault(day,
+                Counter())[name] += 1
+            counters['builder_duration_by_day'].setdefault(day,
+                Counter())[name] += elapsed
+
+            counters['builder_number_by_category'].setdefault(cat,
+                Counter())[name] += 1
+            counters['builder_duration_by_category'].setdefault(cat,
+                Counter())[name] += elapsed
 
             day_cat = '%s.%s' % (day, cat)
-            super_counters.add('builder_number_by_day_and_category', name,
-                1, day_cat)
-            super_counters.add('builder_duration_by_day_and_category', name,
-                elapsed, day_cat)
+            counters['builder_number_by_day_and_category'].setdefault(day_cat,
+                Counter())[name] += 1
+            counters['builder_duration_by_day_and_category'].setdefault(day_cat,
+                Counter())[name] += elapsed
 
         batch.insert(key, columns)
 
