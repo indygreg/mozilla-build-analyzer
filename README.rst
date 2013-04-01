@@ -165,6 +165,9 @@ Run mbd with --help for a list of all the commands. Here are some::
     # Print the raw log output for a build.
     $ mbd log-cat 21177014
 
+    # View times for all mozilla-central builders.
+    $ mbd build-times --category mozilla-central
+
 You can even perform some advanced pipeline tricks, such as printing all the
 logs for a single builder::
 
