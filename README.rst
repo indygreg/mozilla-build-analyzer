@@ -132,12 +132,12 @@ only what you need. Here are some ideas for intelligently importing logs::
     # Windows 7 reftests.
     $ mbd build-logs-synchronize --builder-pattern mozilla-central_win7_test_pgo-reftest
 
-Importing logs takes a long time. And, it consumes a *lot* of internet
-bandwidth. But, the good news is you only need to do this once (at least
-once per job) because logs are idempotent.
+    # Only import logs for mozilla-central after 2013-03-28.
+    $ mbd build-logs-synchronize --after 2013-03-28 --category mozilla-central
 
-*Currently we don't do anything with logs, so it's probably not worth it to
-fetch them yet.*
+Importing logs takes a long time. And, it consumes a *lot* of bandwidth.
+But, the good news is you only need to do this once (at least once per
+build) because logs are idempotent.
 
 Analyzing Data
 ==============
@@ -155,4 +155,53 @@ Run mbd with --help for a list of all the commands. Here are some::
 
     # Print all the builders associated with a builder category.
     $ mbd builders-in-category --print-name mozilla-central
+
+    # Print names of all known builders.
+    $ mbd builder-names
+
+    # Print build ID that occurred on a builder.
+    $ mbd builds-for-builder mozilla-central_ubuntu32_vm_test-xpcshell
+
+    # Print the raw log output for a build.
+    $ mbd log-cat 21177014
+
+You can even perform some advanced pipeline tricks, such as printing all the
+logs for a single builder::
+
+    $ mbd builds-for-builder mozilla-central_ubuntu32_vm_test-xpcshell | xargs mbd log-cat
+
+Frequently Asked Questions
+==========================
+
+Why?
+----
+
+The original author (Gregory Szorc) frequently wanted to perform analysis
+over large sets of build data. Fetching logs individually was often slow
+and had high latency. He didn't want to deal with this so he instead
+created a system for interacting with an offline shadow copy. The results
+are what you see.
+
+Why Cassandra?
+--------------
+
+While SQL would have been a fine choice, the author didn't want to deal
+with writing SQL. He also had previous experience with Cassandra from
+before it hit 1.0. He was not only interested in seeing what all has
+changed, but he was also looking for something familiar he could easily
+implement. Even if the author didn't have experience with Cassandra, he
+would still consider Cassandra because of its operational characteristics.
+
+Is this an official Mozilla project?
+------------------------------------
+
+Not at this time. Although, it's very similar to Datazilla and TBPL, so
+it's possible it may evolve into one.
+
+By copying everything you are creating high load on Mozilla's FTP servers
+-------------------------------------------------------------------------
+
+Yup. But if you perform analysis on all of this data, the net outcome
+is good for the central servers because you don't touch them after
+the initial data fetch.
 
