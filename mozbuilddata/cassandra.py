@@ -256,6 +256,11 @@ class Connection(object):
         return self._all_columns_in_supercolumn_column(cf,
             'builder_name_to_build_ids', builder_name)
 
+    def build_ids_with_builder_id(self, builder_id):
+        cf = ColumnFamily(self.pool, 'indices')
+        return self._all_columns_in_supercolumn_column(cf,
+            'builder_id_to_builds_ids', builder_id)
+
     def build_from_id(self, build_id):
         """Obtain information about a build from its ID."""
         cf = ColumnFamily(self.pool, 'builds')

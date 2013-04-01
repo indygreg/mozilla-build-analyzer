@@ -90,13 +90,19 @@ class CLI(object):
         for build_id in sorted(self.connection.build_ids_in_category(category)):
             print(build_id)
 
+    def builds_for_builder(self, builder_name):
+        builder_ids = self.connection.build_ids_with_builder_name(builder_name)
+        for build_id in sorted(builder_ids):
+            print(build_id)
+
     def build_logs_synchronize(self, **kwargs):
         loader = BuildbotDataLoader(self.connection)
         for msg in loader.load_missing_logs(**kwargs):
             print(msg)
 
     def log_cat(self, build_id):
-        print(self.connection.build_log(build_id))
+        for bid in build_id:
+            print(self.connection.build_log(bid))
 
     def slave_names(self):
         names = set(t[1] for t in self.connection.slaves())
@@ -215,6 +221,12 @@ def main():
     builds_in_category.set_defaults(func='builds_in_category')
     builds_in_category.add_argument('category', help='Category to filter on.')
 
+    builds_for_builder = subparsers.add_parser('builds-for-builder',
+        help='List all builds belonging to a specified builder.')
+    builds_for_builder.set_defaults(func='builds_for_builder')
+    builds_for_builder.add_argument('builder_name',
+        help='Name of the builder to show builds for.')
+
     build_logs_synchronize = subparsers.add_parser('build-logs-synchronize',
         help='Import raw build logs into storage.')
     build_logs_synchronize.set_defaults(func='build_logs_synchronize')
@@ -229,7 +241,8 @@ def main():
 
     log_cat = subparsers.add_parser('log-cat', help='Print a raw build log.')
     log_cat.set_defaults(func='log_cat')
-    log_cat.add_argument('build_id', help='The ID of the build whose log to print.')
+    log_cat.add_argument('build_id', nargs='+',
+        help='The ID of the build whose log to print.')
 
     slave_names = subparsers.add_parser('slave-names',
         help='Print the names of all slaves.')
