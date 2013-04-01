@@ -3,10 +3,11 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-from __future__ import unicode_literals
+from __future__ import print_function, unicode_literals
 
 import argparse
 import calendar
+import datetime
 import operator
 import sys
 import time
@@ -76,6 +77,38 @@ class CLI(object):
                 print(self.connection.get_builder(builder_id)['name'])
             else:
                 print(builder_id)
+
+    def build_times(self, category=None, builder=None):
+        if category and builder:
+            print('Cannot specify both --category and explicit builders.')
+            return 1
+
+        print_builder = False
+        build_ids = set()
+
+        if category:
+            print_builder = True
+            build_ids = set(self.connection.build_ids_in_category(category))
+        else:
+            for builder_name in builder:
+                build_ids |= \
+                    set(self.connection.build_ids_with_builder_name(builder_name))
+
+        for build_id in sorted(build_ids):
+            info = self.connection.build_from_id(build_id)
+            if not info:
+                continue
+
+            print(build_id, '\t', end='')
+
+            elapsed_seconds = (int(info['endtime']) - int(info['starttime']))
+            elapsed = datetime.timedelta(seconds=elapsed_seconds)
+            print(elapsed_seconds, '\t', elapsed, '\t', end='')
+
+            if print_builder:
+                print(info['builder_name'], '\t', end='')
+
+            print('')
 
     def build_steps(self, build_id):
         log = self.connection.build_log(build_id)
@@ -218,6 +251,14 @@ def main():
         help='The category to filter on.')
     builders_in_category.add_argument('--print-name', action='store_true',
         help='Whether to print the name of the builder instead of the ID.')
+
+    build_times = subparsers.add_parser('build-times',
+        help='Print times it took builds to run.')
+    build_times.set_defaults(func='build_times')
+    build_times.add_argument('--category',
+        help='Only include builders in this category.')
+    build_times.add_argument('builder', nargs='*',
+        help='Name of builder to query. Overrides other arguments.')
 
     build_steps = subparsers.add_parser('build-steps',
         help='Print info on all steps performed during a build.')
