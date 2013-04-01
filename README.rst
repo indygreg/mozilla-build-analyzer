@@ -220,7 +220,8 @@ Is this an official Mozilla project?
 ------------------------------------
 
 Not at this time. Although, it's very similar to Datazilla and TBPL, so
-it's possible it may evolve into one.
+it's possible it may evolve into one. There's no Bugzilla component.
+Do everything on GitHub.
 
 By copying everything you are creating high load on Mozilla's FTP servers
 -------------------------------------------------------------------------
