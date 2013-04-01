@@ -7,10 +7,10 @@ data from automated builds conducted to build Firefox and other related
 Mozilla projects.
 
 The bulk of this project is a data store that is effectively a shadow-copy
-of build data which is canonically stored on Mozilla's servers. We use
+of build data that is canonically stored on Mozilla's servers. We use
 Cassandra as the storage backend. Only some analysis is provided. However,
 additional analysis can be facilitated by combing through the mountain of
-data collected.
+data collected that you now have easy access to.
 
 You can think of this project as a combination of the TBPL database,
 Mozilla's FTP server (which hosts the output of all jobs), and Datazilla
@@ -172,6 +172,14 @@ You can even perform some advanced pipeline tricks, such as printing all the
 logs for a single builder::
 
     $ mbd builds-for-builder mozilla-central_ubuntu32_vm_test-xpcshell | xargs mbd log-cat
+
+Disclaimer
+==========
+
+The current state of this project is very alpha. Schemas will likely change.
+There are no guarantees that time spent importing data will not be lost. But
+if you have a faster internet connection and don't mind the inconvenience, go
+right ahead.
 
 Frequently Asked Questions
 ==========================
