@@ -133,12 +133,9 @@ class CLI(object):
             print(build_id)
 
     def build_counts_by_builder(self):
-        builder_names = [t[1] for t in self.connection.builders()]
-
-        for builder in sorted(builder_names):
-            build_ids = \
-                list(self.connection.build_ids_with_builder_name(builder))
-            print('%d\t%s' % (len(build_ids), builder))
+        counts = dict(self.connection.get_counts('builder_number'))
+        for builder in sorted(counts):
+            print('%d\t%s' % (counts[builder], builder))
 
     def build_logs_synchronize(self, **kwargs):
         loader = BuildbotDataLoader(self.connection)

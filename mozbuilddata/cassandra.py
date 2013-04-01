@@ -373,6 +373,28 @@ class Connection(object):
 
         return self.file_data(info['log_url'])
 
+    def get_counts(self, name):
+        """Obtain current counts from a counter in the counts column family."""
+        cf = ColumnFamily(self.pool, 'counters')
+        return self._all_columns_in_row(cf, name)
+
+    def _all_columns_in_row(self, cf, key):
+        try:
+            start_column =''
+            while True:
+                result = cf.get(key, column_start=start_column,
+                    column_finish='', column_count=1000)
+
+                for k, v in result.items():
+                    yield k, v
+                    start_column = k
+
+                if len(result) != 1000:
+                    break
+
+        except NotFoundException:
+            pass
+
     def _all_column_names_in_row(self, cf, key):
         """Generator for names of all columns in a column family."""
         try:
