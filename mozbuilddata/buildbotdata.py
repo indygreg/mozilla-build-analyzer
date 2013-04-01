@@ -4,6 +4,7 @@
 
 from __future__ import unicode_literals
 
+import calendar
 import fnmatch
 import json
 import gzip
@@ -140,8 +141,11 @@ class DataLoader(object):
         yield 'Loaded %d builds' % self.load_builds(obj['builds'],
             obj['builders'])
 
-    def load_missing_logs(self, category=None, builder_pattern=None):
+    def load_missing_logs(self, category=None, builder_pattern=None, after=None):
         """Loads all logs that aren't currently in storage."""
+
+        if isinstance(after, basestring):
+            after = calendar.timegm(time.strptime(after, '%Y-%m-%d'))
 
         if not category and not builder_pattern:
             raise Exception('You must limit to a category or builder pattern.')
@@ -164,25 +168,17 @@ class DataLoader(object):
                 possible_build_ids |= \
                     set(self._connection.build_ids_with_builder_name(builder_name))
 
-        yield '%d builds match import criteria' % len(possible_build_ids)
+        yield '%d builds being considered' % len(possible_build_ids)
 
-        work = {}
-
-        for build_id in sorted(possible_build_ids, reverse=True):
-            info = self._connection.build_from_id(build_id)
-            if not info:
-                continue
-
-            if info['log_fetch_status'] != '':
-                continue
-
-            work[build_id] = info['log_url']
-
-        yield '%d missing logs will be fetched.' % len(work)
+        to_fetch_count = 0
+        fetched_count = 0
+        excluded_count = 0
 
         cf = ColumnFamily(self._pool, 'builds')
 
+        finished_count = [0]
         def on_result(request, build_id, url):
+            finished_count[0] += 1
             if request.status != 200:
                 return
 
@@ -193,12 +189,30 @@ class DataLoader(object):
             now = int(time.time())
             self._connection.store_file(url, request.data, compression, now)
             cf.insert(build_id, {'log_fetch_status': 'fetched'})
-            print('Stored %s' % url)
+            print('(%d/%d) %s' % (finished_count[0], to_fetch_count, url))
 
         fetcher = ParallelHttpFetcher()
-        for build_id in sorted(work, reverse=True):
-            url = work[build_id]
+
+        for build_id in sorted(possible_build_ids, reverse=True):
+            info = self._connection.build_from_id(build_id)
+            if not info:
+                continue
+
+            if info['log_fetch_status'] != '':
+                fetched_count += 1
+                continue
+
+            if after and 'starttime' in info and int(info['starttime']) < after:
+                excluded_count += 1
+                continue
+
+            to_fetch_count += 1
+            url = info['log_url']
             fetcher.add_url(url, on_result, (build_id, url))
+
+        yield '%d builds have been excluded based on filtering.' % excluded_count
+        yield '%d builds have been fetched or do not have a log.' % fetched_count
+        yield '%d missing logs will be fetched.' % to_fetch_count
 
         fetcher.wait()
 
