@@ -181,6 +181,19 @@ There are no guarantees that time spent importing data will not be lost. But
 if you have a faster internet connection and don't mind the inconvenience, go
 right ahead.
 
+Planned Features
+================
+
+This project is still in its infancy. There are many planned features.
+
+One of the biggest areas for future features is more log parsing. One of the
+original goals was to facilitate extraction of per-test metadata from things
+like xpcshell test logs, for example.
+
+We may also consider collecting additional files from public servers. e.g.
+there's no reason we can't store the binary archives and perform symbol
+analysis, etc.
+
 Frequently Asked Questions
 ==========================
 
