@@ -121,9 +121,16 @@ metadata.
 
 Because logs are quite large (tens of gigabytes) and since you are likely
 only interested in a subset of logs, it's usually a good idea to import
-only what you need. Here is how you would import just xpcshell test logs::
+only what you need. Here are some ideas for intelligently importing logs::
 
-    $ mbd load-raw-logs --builder-pattern '*xpcshell*'
+    # Only import logs for mozilla-central.
+    $ mbd build-logs-synchronize --category mozilla-central
+
+    # Only import xpcshell logs for PGO builds.
+    $ mbd build-logs-synchronize --builder-pattern '*pgo*xpchsell*'
+
+    # Windows 7 reftests.
+    $ mbd build-logs-synchronize --builder-pattern mozilla-central_win7_test_pgo-reftest
 
 Importing logs takes a long time. And, it consumes a *lot* of internet
 bandwidth. But, the good news is you only need to do this once (at least

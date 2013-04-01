@@ -77,8 +77,8 @@ class CLI(object):
             else:
                 print(builder_id)
 
-    def job_steps(self, job_id):
-        log = self.connection.raw_log(job_id)
+    def build_steps(self, build_id):
+        log = self.connection.build_log(build_id)
         parsed = parse_job_log(log)
         for step in parsed.steps:
             print('%s %s %s %s' % (
@@ -90,13 +90,13 @@ class CLI(object):
         for build_id in sorted(self.connection.build_ids_in_category(category)):
             print(build_id)
 
-    def load_raw_logs(self, **kwargs):
+    def build_logs_synchronize(self, **kwargs):
         loader = BuildbotDataLoader(self.connection)
         for msg in loader.load_missing_logs(**kwargs):
             print(msg)
 
-    def log_cat(self, job_id):
-        print(self.connection.raw_log(job_id))
+    def log_cat(self, build_id):
+        print(self.connection.build_log(build_id))
 
     def slave_names(self):
         names = set(t[1] for t in self.connection.slaves())
@@ -178,7 +178,7 @@ def main():
     build_files_synchronize.set_defaults(func='build_files_synchronize')
 
     build_metadata_load = subparsers.add_parser('build-metadata-load',
-        help='Load information about buildbot jobs into storage.')
+        help='Load information about buildbot builds into storage.')
     build_metadata_load.add_argument('--day', nargs='*', dest='days',
         help='Day to load. Specified as a YYYY-MM-DD value.')
     build_metadata_load.add_argument('--day-count', type=int,
@@ -205,27 +205,29 @@ def main():
     builders_in_category.add_argument('--print-name', action='store_true',
         help='Whether to print the name of the builder instead of the ID.')
 
-    job_steps = subparsers.add_parser('job-steps',
-        help='Print info on all steps performed during a job.')
-    job_steps.set_defaults(func='job_steps')
-    job_steps.add_argument('job_id', help='ID of the job to analyze.')
+    build_steps = subparsers.add_parser('build-steps',
+        help='Print info on all steps performed during a build.')
+    build_steps.set_defaults(func='build_steps')
+    build_steps.add_argument('build_id', help='ID of the build to analyze.')
 
     builds_in_category = subparsers.add_parser('builds-in-category',
-        help='List all the jobs belonging to a specified category.')
+        help='List all the builds belonging to a specified category.')
     builds_in_category.set_defaults(func='builds_in_category')
     builds_in_category.add_argument('category', help='Category to filter on.')
 
-    load_raw_logs = subparsers.add_parser('load-raw-logs',
-        help='Load raw job logs into storage.')
-    load_raw_logs.set_defaults(func='load_raw_logs')
-    load_raw_logs.add_argument('--builder-pattern',
-        help='Only load loads for builders matching this pattern. The pattern '
+    build_logs_synchronize = subparsers.add_parser('build-logs-synchronize',
+        help='Import raw build logs into storage.')
+    build_logs_synchronize.set_defaults(func='build_logs_synchronize')
+    build_logs_synchronize.add_argument('--builder-pattern',
+        help='Only load logs for builders matching this pattern. The pattern '
             'is a UNIX shell glob style pattern match, performed without '
             'regard to character case.')
+    build_logs_synchronize.add_argument('--category',
+        help='Only consider builds in this category.')
 
-    log_cat = subparsers.add_parser('log-cat', help='Print a raw job log.')
+    log_cat = subparsers.add_parser('log-cat', help='Print a raw build log.')
     log_cat.set_defaults(func='log_cat')
-    log_cat.add_argument('job_id', help='The ID of the job whose log to print.')
+    log_cat.add_argument('build_id', help='The ID of the build whose log to print.')
 
     slave_names = subparsers.add_parser('slave-names',
         help='Print the names of all slaves.')

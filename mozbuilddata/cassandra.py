@@ -235,20 +235,16 @@ class Connection(object):
         except NotFoundException:
             return None
 
-    def raw_log(self, job_id):
+    def build_log(self, build_id):
         """Obtain the raw log for a job from its ID."""
-        cf = ColumnFamily(self.pool, 'raw_job_logs')
-
-        try:
-            cols = cf.get(job_id)
-        except NotFoundException:
+        info = self.build_from_id(build_id)
+        if not info:
             return None
 
-        # We store logs compressed, so uncompress it.
-        raw = StringIO(cols['log'])
-        gz = gzip.GzipFile(fileobj=raw)
+        if 'log_url' not in info:
+            return None
 
-        return gz.read()
+        return self.file_data(info['log_url'])
 
     def _all_columns_in_supercolumn_column(self, cf, key, column):
         """Generator for the names of all columns in a supercolumn column."""

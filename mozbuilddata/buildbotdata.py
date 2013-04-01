@@ -7,8 +7,6 @@ from __future__ import unicode_literals
 import fnmatch
 import json
 import gzip
-import httplib
-import multiprocessing
 import re
 import time
 import urllib2
@@ -16,6 +14,8 @@ import urllib2
 from StringIO import StringIO
 
 from pycassa.columnfamily import ColumnFamily
+
+from .httputil import ParallelHttpFetcher
 
 
 # Where public build data is available from. Feed into strftime for the day you
@@ -54,39 +54,6 @@ def available_build_files():
         t = time.strptime(d['date'], '%d-%b-%Y %H:%M')
 
         yield d['path'], time.mktime(t), int(d['size'])
-
-
-def fetch_log(params):
-    job, url = params
-
-    try:
-        io = urllib2.urlopen(url)
-        return True, job, io.read()
-    except KeyboardInterrupt:
-        return
-    except Exception as e:
-        print(e)
-        return False, job, None
-
-
-def fetch_logs(cf, log_cf, urls):
-    pool = multiprocessing.Pool(processes=4)
-
-    entries = [(k, v) for k, v in urls.items()]
-
-    remaining = len(entries)
-
-    for success, job, data in pool.imap(fetch_log, entries):
-        remaining -= 1
-
-        if success:
-            now = unicode(int(time.time()))
-            cf.insert(unicode(job), {'log_fetch_time': now})
-            log_cf.insert(unicode(job), {
-                'fetch_time': now,
-                'log': data,
-            })
-            yield '%d Stored log for %s' % (remaining, job)
 
 
 class DataLoader(object):
@@ -172,30 +139,70 @@ class DataLoader(object):
         yield 'Loaded %d builds' % self.load_builds(obj['builds'],
             obj['builders'])
 
-    def load_missing_logs(self, builder_pattern=None):
+    def load_missing_logs(self, category=None, builder_pattern=None):
         """Loads all logs that aren't currently in storage."""
+
+        if not category and not builder_pattern:
+            raise Exception('You must limit to a category or builder pattern.')
+
+        builders = list(self._connection.builders())
+        builder_names = set(t[1] for t in builders)
+
+        possible_build_ids = set()
+
+        if category:
+            possible_build_ids |= \
+                set(self._connection.build_ids_in_category(category))
+
+        if builder_pattern:
+            for builder_name in builder_names:
+                if not fnmatch.fnmatch(builder_name.lower(),
+                    builder_pattern.lower()):
+                    continue
+
+                possible_build_ids |= \
+                    set(self._connection.build_ids_with_builder_name(builder_name))
+
+        yield '%d builds match import criteria' % len(possible_build_ids)
+
         missing_urls = {}
 
-        cf = ColumnFamily(self._pool, 'jobs')
-        columns = ('buildername', 'log_url', 'log_fetch_time')
-        for key, cols in cf.get_range(columns=columns):
-            if 'log_url' not in cols:
+        for build_id in sorted(possible_build_ids, reverse=True):
+            info = self._connection.build_from_id(build_id)
+            if not info:
                 continue
 
-            if 'log_fetch_time' in cols:
+            if 'log_url' not in info:
                 continue
 
-            if builder_pattern and ('buildername' not in cols or \
-                not fnmatch.fnmatch(cols['buildername'].lower(),
-                    builder_pattern.lower())):
+            if 'log_fetch_time' in info:
                 continue
 
-            missing_urls[key] = cols['log_url']
+            missing_urls[build_id] = info['log_url']
 
         yield '%d missing logs will be fetched.' % len(missing_urls)
-        log_cf = ColumnFamily(self._pool, 'raw_job_logs')
-        for result in fetch_logs(cf, log_cf, missing_urls):
-            yield result
+
+        cf = ColumnFamily(self._pool, 'builds')
+
+        def on_result(request, build_id, url):
+            if request.status != 200:
+                return
+
+            compression = None
+            if url.endswith('.gz'):
+                compression = 'gzip'
+
+            now = int(time.time())
+            self._connection.store_file(url, request.data, compression, now)
+            cf.insert(build_id, {'log_fetch_time': unicode(now)})
+            print('Stored %s' % url)
+
+        fetcher = ParallelHttpFetcher()
+        for build_id in sorted(missing_urls, reverse=True):
+            url = missing_urls[build_id]
+            fetcher.add_url(url, on_result, (build_id, url))
+
+        fetcher.wait()
 
     def load_slaves(self, o):
         cf = ColumnFamily(self._pool, 'slaves')
@@ -282,6 +289,8 @@ class DataLoader(object):
 
             i_batch.insert('builder_category_to_build_ids',
                 {builder['category']: {key: ''}})
+            i_batch.insert('builder_name_to_build_ids',
+                {builder['name']: {key: ''}})
 
         batch.insert(key, columns)
 
