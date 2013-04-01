@@ -36,6 +36,12 @@ COLUMN_FAMILIES = {
         'subcomparator': 'UTF8Type',
         'default_validation_class': 'UTF8Type',
     },
+    'simple_indices': {
+        'comment': 'Version of indices with a regular column family.',
+        'key_validation_class': 'UTF8Type',
+        'comparator_type': UTF8_TYPE,
+        'default_validation_class': 'UTF8Type',
+    },
     'builders': {
         'comment': 'Information about different job types (builders).',
         'key_validation_class': 'UTF8Type',
@@ -78,8 +84,19 @@ COLUMN_FAMILIES = {
 
 COLUMN_TYPES = {}
 
+BUILD_METADATA_INDICES = [
+    'builder_category_to_builder_ids',
+    'builder_category_to_build_ids',
+    'builder_id_to_build_ids',
+    'builder_id_to_slave_ids',
+    'builder_name_to_build_ids',
+    'master_id_to_build_ids',
+    'master_id_to_slave_ids',
+    'slave_id_to_build_ids',
+]
 
 class Connection(object):
+
     def __init__(self):
         self.pool = None
 
@@ -117,7 +134,7 @@ class Connection(object):
                 manager.alter_column(keyspace, name, column, column_type)
 
         self.pool = pycassa.pool.ConnectionPool(keyspace, server_list=servers,
-            *args, **kwargs)
+            timeout=30, *args, **kwargs)
 
     def store_file(self, key, content, compression=None, mtime=-1):
         cf = ColumnFamily(self.pool, 'files')
@@ -135,6 +152,9 @@ class Connection(object):
             'mtime': mtime,
             'data': content,
         })
+
+        indices = ColumnFamily(self.pool, 'simple_indices')
+        indices.insert('files', {key: ''})
 
     def file_metadata(self, keys):
         """Obtain metadata for a stored file.
@@ -165,15 +185,24 @@ class Connection(object):
         except NotFoundException:
             return None
 
+    def filenames(self):
+        """Obtain the keys of all stored files."""
+        cf = ColumnFamily(self.pool, 'simple_indices')
+        return self._all_column_names_in_row(cf, 'files')
+
     def truncate_build_metadata(self):
         """Truncates all derived build metadata.
 
         This bulk removes all build metadata and should not be performed
         unless you want to reload all derived data!
         """
-        for cf in ['slaves', 'masters', 'builders', 'builds', 'indices']:
+        for cf in ['slaves', 'masters', 'builders', 'builds']:
             cf = ColumnFamily(self.pool, cf)
             cf.truncate()
+
+        cf = ColumnFamily(self.pool, 'indices')
+        for key in BUILD_METADATA_INDICES:
+            cf.remove(key)
 
     def builders(self):
         """Obtain info about all builders."""
@@ -245,6 +274,24 @@ class Connection(object):
             return None
 
         return self.file_data(info['log_url'])
+
+    def _all_column_names_in_row(self, cf, key):
+        """Generator for names of all columns in a column family."""
+        try:
+            start_column = ''
+            while True:
+                result = cf.get(key, column_start=start_column,
+                    column_finish='', column_count=1000)
+
+                for column_name in result.keys():
+                    yield column_name
+                    start_column = column_name
+
+                if len(result) != 1000:
+                    break
+
+        except NotFoundException:
+            pass
 
     def _all_columns_in_supercolumn_column(self, cf, key, column):
         """Generator for the names of all columns in a supercolumn column."""

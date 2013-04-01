@@ -166,22 +166,19 @@ class DataLoader(object):
 
         yield '%d builds match import criteria' % len(possible_build_ids)
 
-        missing_urls = {}
+        work = {}
 
         for build_id in sorted(possible_build_ids, reverse=True):
             info = self._connection.build_from_id(build_id)
             if not info:
                 continue
 
-            if 'log_url' not in info:
+            if info['log_fetch_status'] != '':
                 continue
 
-            if 'log_fetch_time' in info:
-                continue
+            work[build_id] = info['log_url']
 
-            missing_urls[build_id] = info['log_url']
-
-        yield '%d missing logs will be fetched.' % len(missing_urls)
+        yield '%d missing logs will be fetched.' % len(work)
 
         cf = ColumnFamily(self._pool, 'builds')
 
@@ -195,12 +192,12 @@ class DataLoader(object):
 
             now = int(time.time())
             self._connection.store_file(url, request.data, compression, now)
-            cf.insert(build_id, {'log_fetch_time': unicode(now)})
+            cf.insert(build_id, {'log_fetch_status': 'fetched'})
             print('Stored %s' % url)
 
         fetcher = ParallelHttpFetcher()
-        for build_id in sorted(missing_urls, reverse=True):
-            url = missing_urls[build_id]
+        for build_id in sorted(work, reverse=True):
+            url = work[build_id]
             fetcher.add_url(url, on_result, (build_id, url))
 
         fetcher.wait()
@@ -229,15 +226,18 @@ class DataLoader(object):
         indices = ColumnFamily(self._pool, 'indices')
         i_batch = indices.batch()
 
+        existing_filenames = set(self._connection.filenames())
+
         for build in o:
-            self._load_build(batch, i_batch, build, builders)
+            self._load_build(batch, i_batch, build, builders,
+                existing_filenames)
 
         batch.send()
         i_batch.send()
 
         return len(o)
 
-    def _load_build(self, batch, i_batch, o, builders):
+    def _load_build(self, batch, i_batch, o, builders, existing_filenames):
         key = str(o['id'])
 
         props = o.get('properties', {})
@@ -247,7 +247,7 @@ class DataLoader(object):
 
         i_batch.insert('slave_id_to_build_ids', {slave_id: {key: ''}})
         i_batch.insert('master_id_to_build_ids', {master_id: {key: ''}})
-        i_batch.insert('builder_id_build_ids', {builder_id: {key: ''}})
+        i_batch.insert('builder_id_to_build_ids', {builder_id: {key: ''}})
 
         columns = {}
         for k, v in o.items():
@@ -282,11 +282,14 @@ class DataLoader(object):
 
             raise Exception('Unknown non-simple field: %s %s' % (k, v))
 
+        columns['log_fetch_status'] = ''
+
         # Look for existing log.
         if 'log_url' in columns:
-            file_meta = self._connection.file_metadata(columns['log_url'])
-            if file_meta:
-                columns['log_fetch_time'] = unicode(file_meta['mtime'])
+            if columns['log_url'] in existing_filenames:
+                columns['log_fetch_status'] = 'fetched'
+        else:
+            columns['log_fetch_status'] = 'nolog'
 
         builder_id = columns.get('builder_id')
         if builder_id and builder_id in builders:
