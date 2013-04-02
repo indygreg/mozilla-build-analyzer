@@ -15,6 +15,8 @@ from pycassa.columnfamily import ColumnFamily
 
 from pycassa.system_manager import (
     BYTES_TYPE,
+    DATE_TYPE,
+    INT_TYPE,
     KEYS_INDEX,
     LONG_TYPE,
     UTF8_TYPE,
@@ -52,14 +54,26 @@ COLUMN_FAMILIES = {
         'comment': 'Stores raw files.',
         'key_validation_class': 'UTF8Type',
         'comparator_type': UTF8_TYPE,
-        'default_validation_class': 'BytesType',
+        'default_validation_class': 'UTF8Type',
         'column_validation_classes': {
-            'storage_format': LONG_TYPE,
-            'compression': UTF8_TYPE,
-            'sha1': BYTES_TYPE,
-            'size': LONG_TYPE,
-            'mtime': LONG_TYPE,
-            'data': BYTES_TYPE,
+            'version': INT_TYPE,
+            'sha1': UTF8_TYPE,
+            'size': INT_TYPE,
+            'mtime': DATE_TYPE,
+            'compression_state': UTF8_TYPE,
+            'compressed_size': INT_TYPE,
+        },
+    },
+    'blobs': {
+        'comment': 'Holds opaque binary blobs.',
+        'key_validation_class': 'UTF8Type',
+        'comparator_type': INT_TYPE,
+        'default_validation_class': 'BytesType',
+        # While slower, the DeflateCompressor gives much better compression
+        # for what we store in here (logs) than Snappy (2-2.5x better).
+        'compression_options': {
+            'sstable_compression': 'DeflateCompressor',
+            'chunk_length_kb': '512',
         },
     },
 
@@ -152,6 +166,8 @@ LOG_METADATA_SUPER_COUNTERS = [
     'build_step_duration_by_day_and_category',
 ]
 
+BLOB_CHUNK_SIZE = 8388608
+
 class Connection(object):
 
     def __init__(self):
@@ -193,25 +209,75 @@ class Connection(object):
         self.pool = pycassa.pool.ConnectionPool(keyspace, server_list=servers,
             timeout=30, *args, **kwargs)
 
-    def store_file(self, key, content, compression=None, mtime=-1):
-        cf = ColumnFamily(self.pool, 'files')
+    def store_blob(self, content):
+        cf = ColumnFamily(self.pool, 'blobs')
+        chunks = len(content) / BLOB_CHUNK_SIZE + 1
+
         sha1 = hashlib.sha1()
         sha1.update(content)
+        key = sha1.hexdigest()
 
-        compression = compression or 'none'
-        assert compression in ('none', 'gzip', 'bzip')
+        offset = 0
+        i = 1
+        while True:
+            b = content[offset:offset + BLOB_CHUNK_SIZE]
+            cf.insert(key, {i: b})
 
-        cf.insert(key, {
-            'storage_format': 1,
-            'sha1': sha1.digest(),
-            'compression': compression,
-            'size': len(content),
-            'mtime': mtime,
-            'data': content,
-        })
+            if len(b) < BLOB_CHUNK_SIZE:
+                break
+
+            offset += BLOB_CHUNK_SIZE
+            i += 1
 
         indices = ColumnFamily(self.pool, 'simple_indices')
-        indices.insert('files', {key: ''})
+        indices.insert('blobs', {key: ''})
+
+        return key
+
+    def get_blob(self, key):
+        cf = ColumnFamily(self.pool, 'blobs')
+
+        sha1 = hashlib.sha1()
+
+        i = 1
+        chunks = []
+        while True:
+            chunk = cf.get(key, columns=[i])[i]
+            sha1.update(chunk)
+            chunks.append(chunk)
+            if len(chunk) != BLOB_CHUNK_SIZE:
+                break
+
+        if sha1.hexdigest() != key:
+            raise Exception('SHA-1 of returned blob does not match stored.')
+
+        return ''.join(chunks)
+
+    def store_file(self, filename, content, mtime=-1, compression_state=None,
+        compressed_size=None):
+
+        cf = ColumnFamily(self.pool, 'files')
+
+        compression_state = compression_state or 'unknown'
+        assert compression_state in ('none', 'unknown', 'gzip')
+
+        blob_id = self.store_blob(content)
+
+        cols = {
+            'version': 1,
+            'sha1': blob_id,
+            'size': len(content),
+            'mtime': mtime,
+            'compression_state': compression_state,
+        }
+
+        if compressed_size is not None:
+            cols['compressed_size'] = compressed_size
+
+        cf.insert(filename, cols)
+
+        indices = ColumnFamily(self.pool, 'simple_indices')
+        indices.insert('files', {filename: ''})
 
     def file_metadata(self, keys):
         """Obtain metadata for a stored file.
@@ -220,24 +286,19 @@ class Connection(object):
         """
         cf = ColumnFamily(self.pool, 'files')
 
-        result = cf.multiget(keys,
-            columns=['storage_format', 'sha1', 'compression', 'mtime', 'size'])
-
-        return result
+        return cf.multiget(keys)
 
     def file_data(self, key):
-        cf = ColumnFamily(self.pool, 'files')
+        fcf = ColumnFamily(self.pool, 'files')
 
         try:
-            columns = cf.get(key, columns=['data', 'compression'])
-            if columns['compression'] == 'none':
-                return columns['data']
+            columns = cf.get(key, columns=['sha1', 'compression_state'])
+            raw = self.get_blob(columns['sha1'])
 
-            if columns['compression'] == 'gzip':
-                s = StringIO(columns['data'])
-                return gzip.GzipFile(fileobj=s).read()
+            if columns['compression_state'] in ('none', 'unknown'):
+                return raw
 
-            raise Exception('Unknown compression: %s' % columns['compression'])
+            raise Exception('We do not currently handle decompression.')
 
         except NotFoundException:
             return None

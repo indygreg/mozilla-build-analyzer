@@ -57,9 +57,9 @@ def available_build_files():
         if d['path'].endswith('.tmp'):
             continue
 
-        t = time.strptime(d['date'], '%d-%b-%Y %H:%M')
+        t = datetime.datetime.strptime(d['date'], '%d-%b-%Y %H:%M')
 
-        yield d['path'], time.mktime(t), int(d['size'])
+        yield d['path'], t, int(d['size'])
 
 
 class DataLoader(object):
@@ -79,44 +79,38 @@ class DataLoader(object):
         existing = {}
         for url in server_files:
             existing.update(self._connection.file_metadata([url]))
-        populate = set()
 
-        for url in server_files:
+        fetcher = ParallelHttpFetcher()
+
+        def on_result(request, url):
+            if request.status != 200:
+                return
+
+            server_state = server_files[url]
+
+            # urllib3 will automagically decompress the files for us.
+            data = request.data
+            self._connection.store_file(url, data, mtime=server_state[0],
+                compression_state='none', compressed_size=server_state[1])
+            print('Stored %s' % url)
+
+        for url in sorted(server_files, reverse=True):
             if url not in existing:
-                populate.add(url)
+                yield 'Will import new file: %s' % url
+                fetcher.add_url(url, on_result, (url,))
                 continue
 
             local_meta = existing[url]
             server_meta = server_files[url]
 
-            if local_meta['mtime'] < server_meta[0]:
-                yield 'Will refresh %s because newer mtime on server' % url
-                populate.add(url)
+            if local_meta['mtime'] >= server_meta[0]:
                 continue
 
-            if local_meta['size'] != server_meta[1]:
-                yield 'Will refresh %s because size changed' % url
-                populate.add(url)
-                continue
+            yield 'Will refresh %s because newer mtime on server' % url
+            fetcher.add_url(url, on_result, (url,))
+            continue
 
-        # We reuse the connection take advantage of slow start, etc.
-        conn = httplib.HTTPConnection(BUILD_DATA_HOST, BUILD_DATA_PORT)
-
-        for url in sorted(populate, reverse=True):
-            yield 'Adding %s' % url
-            conn.request('GET', url)
-            response = conn.getresponse()
-            if response.status != 200:
-                raise Exception('Error fetching %s: %d' % (url,
-                    response.status))
-
-            data = response.read()
-            compression = None
-            if url.endswith('.gz'):
-                compression = 'gzip'
-
-            self._connection.store_file(url, data, mtime=server_files[url][0],
-                compression=compression)
+        fetcher.wait()
 
     def load_build_metadata(self, url):
         """Loads build metadata from JSON in a URL."""
@@ -186,12 +180,14 @@ class DataLoader(object):
             if request.status != 200:
                 return
 
-            compression = None
+            data = request.data
+
             if url.endswith('.gz'):
-                compression = 'gzip'
+                s = StringIO(data)
+                data = gzip.GzipFile(fileobj=s).read()
 
             now = int(time.time())
-            self._connection.store_file(url, request.data, compression, now)
+            self._connection.store_file(url, data, now)
             cf.insert(build_id, {'log_fetch_status': 'fetched'})
             print('(%d/%d) %s' % (finished_count[0], to_fetch_count, url))
 
