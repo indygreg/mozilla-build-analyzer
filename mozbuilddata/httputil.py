@@ -11,6 +11,7 @@ from Queue import (
     Queue,
 )
 
+import socket
 import time
 
 import urllib3
@@ -28,6 +29,9 @@ def thread_worker(shutdown, pool, request_queue):
             if callback:
                 args = callback_args or []
                 callback(r, *callback_args)
+        except socket.gaierror as e:
+            print('Exception fetching %s' % url)
+            print(e)
         finally:
             request_queue.task_done()
 
