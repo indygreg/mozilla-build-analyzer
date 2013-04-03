@@ -26,6 +26,46 @@ from pycassa import NotFoundException
 
 
 COLUMN_FAMILIES = {
+    # Blobs are where we store large, seldomly read and written binary blobs
+    # of data. This is where we put raw build logs and summaries of builds.
+    'blobs': {
+        'comment': 'Holds opaque binary blobs.',
+        'key_validation_class': 'UTF8Type',
+        'comparator_type': 'UTF8Type',
+        'default_validation_class': 'BytesType',
+        'column_validation_classes': {
+            'version': INT_TYPE,
+            'sha1': BYTES_TYPE,
+            'size': INT_TYPE,
+            'chunk_count': INT_TYPE,
+            'chunk_size': INT_TYPE,
+        },
+        # While slower, the DeflateCompressor gives much better compression
+        # for what we store in here (logs) than Snappy (2-2.5x better).
+        'compression_options': {
+            'sstable_compression': 'DeflateCompressor',
+            'chunk_length_kb': '512',
+        },
+    },
+    # Files are essentially an index into blobs. They are where we record which
+    # files have been fetched and their state in the blobs column family. There
+    # is significant overlap between the metadata in here and blobs. The reason
+    # is this column is quick to read from because rows are small. Blobs should
+    # only be read when accessing the content of a specific file.
+    'files': {
+        'comment': 'Stores raw files.',
+        'key_validation_class': 'UTF8Type',
+        'comparator_type': UTF8_TYPE,
+        'default_validation_class': 'UTF8Type',
+        'column_validation_classes': {
+            'version': INT_TYPE,
+            'sha1': BYTES_TYPE,
+            'size': INT_TYPE,
+            'mtime': DATE_TYPE,
+            'compression_state': UTF8_TYPE,
+            'compressed_size': INT_TYPE,
+        },
+    },
     'builders': {
         'comment': 'Information about different job types (builders).',
         'key_validation_class': 'UTF8Type',
@@ -49,32 +89,6 @@ COLUMN_FAMILIES = {
         'key_validation_class': 'UTF8Type',
         'comparator_type': UTF8_TYPE,
         'default_validation_class': 'UTF8Type',
-    },
-    'files': {
-        'comment': 'Stores raw files.',
-        'key_validation_class': 'UTF8Type',
-        'comparator_type': UTF8_TYPE,
-        'default_validation_class': 'UTF8Type',
-        'column_validation_classes': {
-            'version': INT_TYPE,
-            'sha1': UTF8_TYPE,
-            'size': INT_TYPE,
-            'mtime': DATE_TYPE,
-            'compression_state': UTF8_TYPE,
-            'compressed_size': INT_TYPE,
-        },
-    },
-    'blobs': {
-        'comment': 'Holds opaque binary blobs.',
-        'key_validation_class': 'UTF8Type',
-        'comparator_type': INT_TYPE,
-        'default_validation_class': 'BytesType',
-        # While slower, the DeflateCompressor gives much better compression
-        # for what we store in here (logs) than Snappy (2-2.5x better).
-        'compression_options': {
-            'sstable_compression': 'DeflateCompressor',
-            'chunk_length_kb': '512',
-        },
     },
 
     # Derived data.
@@ -166,7 +180,7 @@ LOG_METADATA_SUPER_COUNTERS = [
     'build_step_duration_by_day_and_category',
 ]
 
-BLOB_CHUNK_SIZE = 8388608
+DEFAULT_BLOB_CHUNK_SIZE = 1048576
 
 class Connection(object):
 
@@ -209,47 +223,76 @@ class Connection(object):
         self.pool = pycassa.pool.ConnectionPool(keyspace, server_list=servers,
             timeout=30, *args, **kwargs)
 
-    def store_blob(self, content):
+    def store_blob(self, key, content, chunk_size=DEFAULT_BLOB_CHUNK_SIZE):
         cf = ColumnFamily(self.pool, 'blobs')
-        chunks = len(content) / BLOB_CHUNK_SIZE + 1
+        chunks = len(content) / chunk_size + 1
 
         sha1 = hashlib.sha1()
         sha1.update(content)
-        key = sha1.hexdigest()
 
         offset = 0
         i = 1
         while True:
-            b = content[offset:offset + BLOB_CHUNK_SIZE]
-            cf.insert(key, {i: b})
+            b = content[offset:offset + chunk_size]
+            # We prefix each part with "z" so the big chunks come at the end of
+            # the row and our initial read for all the metadata doesn't span
+            # excessive pages on disk.
+            cf.insert(key, {'z:%04d' % i: b})
 
-            if len(b) < BLOB_CHUNK_SIZE:
+            if len(b) < chunk_size:
                 break
 
-            offset += BLOB_CHUNK_SIZE
+            offset += chunk_size
             i += 1
+
+        cf.insert(key, {
+            'version': 1,
+            'sha1': sha1.digest(),
+            'size': len(content),
+            'chunk_size': chunk_size,
+            'chunk_count': chunks,
+        })
 
         indices = ColumnFamily(self.pool, 'simple_indices')
         indices.insert('blobs', {key: ''})
+        indices.insert('blob_size', {key: str(len(content))})
 
-        return key
+        return sha1.digest()
 
     def get_blob(self, key):
         cf = ColumnFamily(self.pool, 'blobs')
 
-        sha1 = hashlib.sha1()
+        row = cf.get(key, columns=['version', 'sha1', 'size', 'chunk_size',
+            'chunk_count', 'z:0001'])
 
-        i = 1
-        chunks = []
-        while True:
-            chunk = cf.get(key, columns=[i])[i]
+        if 'version' not in row:
+            raise Exception('No version column in blob.')
+
+        if row['version'] != 1:
+            raise Exception('Unknown version: %d' % row['version'])
+
+        if 'z:0001' not in row:
+            raise Exception('No data in blob.')
+
+        sha1 = hashlib.sha1()
+        sha1.update(row['z:0001'])
+
+        if len(row['z:0001']) == row['size']:
+            if sha1.digest() != row['sha1']:
+                raise Exception('SHA-1 validation failed.')
+
+            return row['z:0001']
+
+        chunks = [row['z:0001']]
+
+        for i in range(2, row['chunk_count'] + 1):
+            col = 'z:%04d' % i
+            chunk = cf.get(key, columns=[col])[col]
             sha1.update(chunk)
             chunks.append(chunk)
-            if len(chunk) != BLOB_CHUNK_SIZE:
-                break
 
-        if sha1.hexdigest() != key:
-            raise Exception('SHA-1 of returned blob does not match stored.')
+        if sha1.digest() != row['sha1']:
+            raise Exception('SHA-1 validation failed.')
 
         return ''.join(chunks)
 
@@ -261,11 +304,11 @@ class Connection(object):
         compression_state = compression_state or 'unknown'
         assert compression_state in ('none', 'unknown', 'gzip')
 
-        blob_id = self.store_blob(content)
+        sha1 = self.store_blob(filename, content)
 
         cols = {
             'version': 1,
-            'sha1': blob_id,
+            'sha1': sha1,
             'size': len(content),
             'mtime': mtime,
             'compression_state': compression_state,
@@ -289,11 +332,11 @@ class Connection(object):
         return cf.multiget(keys)
 
     def file_data(self, key):
-        fcf = ColumnFamily(self.pool, 'files')
+        cf = ColumnFamily(self.pool, 'files')
 
         try:
-            columns = cf.get(key, columns=['sha1', 'compression_state'])
-            raw = self.get_blob(columns['sha1'])
+            columns = cf.get(key, columns=['compression_state'])
+            raw = self.get_blob(key)
 
             if columns['compression_state'] in ('none', 'unknown'):
                 return raw

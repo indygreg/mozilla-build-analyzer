@@ -181,13 +181,16 @@ class DataLoader(object):
                 return
 
             data = request.data
+            compressed_size = None
 
             if url.endswith('.gz'):
                 s = StringIO(data)
+                compressed_size = len(s.getvalue())
                 data = gzip.GzipFile(fileobj=s).read()
 
             now = int(time.time())
-            self._connection.store_file(url, data, now)
+            self._connection.store_file(url, data, now,
+                compression_state='none', compressed_size=compressed_size)
             cf.insert(build_id, {'log_fetch_status': 'fetched'})
             print('(%d/%d) %s' % (finished_count[0], to_fetch_count, url))
 
