@@ -8,6 +8,7 @@ from __future__ import print_function, unicode_literals
 import argparse
 import calendar
 import datetime
+import numpy
 import operator
 import sys
 import time
@@ -77,6 +78,22 @@ class CLI(object):
                 print(self.connection.get_builder(builder_id)['name'])
             else:
                 print(builder_id)
+
+    def builder_median_times(self):
+        builders = self.connection.builders()
+        for builder in sorted(set(t[1] for t in builders)):
+            build_ids = self.connection.build_ids_with_builder_name(builder)
+
+            times = []
+            for build_id, duration in self.connection.build_durations(build_ids):
+                times.append(duration)
+
+            if not len(times):
+                continue
+
+            times = numpy.array(times)
+            median = numpy.median(times)
+            print('%d\t%s' % (median, builder))
 
     def build_times(self, category=None, builder=None):
         if category and builder:
@@ -266,6 +283,10 @@ def main():
         help='The category to filter on.')
     builders_in_category.add_argument('--print-name', action='store_true',
         help='Whether to print the name of the builder instead of the ID.')
+
+    builder_median_times = subparsers.add_parser('builder-median-times',
+        help='Print the median execution times of builders.')
+    builder_median_times.set_defaults(func='builder_median_times')
 
     build_times = subparsers.add_parser('build-times',
         help='Print times it took builds to run.')
