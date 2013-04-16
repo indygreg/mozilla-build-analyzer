@@ -298,7 +298,7 @@ class Connection(object):
         if sha1.digest() != row['sha1']:
             raise Exception('SHA-1 validation failed.')
 
-        return ''.join(chunks)
+        return b''.join(chunks)
 
     def store_file(self, filename, content, mtime=-1, compression_state=None,
         compressed_size=None):
