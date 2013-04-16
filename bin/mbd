@@ -269,6 +269,13 @@ class CLI(object):
             print('%s\t%d\t%d' % (filename, info['size'],
                 info['compressed_size']))
 
+    def json_export(self, path):
+        from mozbuilddata.exporter import JSONExporter
+
+        exporter = JSONExporter(self.connection, path)
+        for msg in exporter.export():
+            print(msg)
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -399,6 +406,11 @@ def main():
     file_sizes = subparsers.add_parser('file-sizes',
         help='Print all files and their sizes.')
     file_sizes.set_defaults(func='file_sizes')
+
+    json_export = subparsers.add_parser('json-export',
+        help='Export data to JSON.')
+    json_export.set_defaults(func='json_export')
+    json_export.add_argument('path', help='Directory to write files to.')
 
     args = parser.parse_args()
 

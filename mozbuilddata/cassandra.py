@@ -414,6 +414,9 @@ class Connection(object):
         for key, cols in cf.get_range(columns=['category', 'master', 'name']):
             yield key, cols['name'], cols['category'], cols['master']
 
+    def builder_categories(self):
+        return set(t[2] for t in self.builders())
+
     def get_builder(self, builder_id):
         """Obtain info about a builder from its ID."""
         cf = ColumnFamily(self.pool, 'builders')
@@ -426,6 +429,27 @@ class Connection(object):
         cf = ColumnFamily(self.pool, 'indices')
         return self._all_columns_in_supercolumn_column(cf,
             'builder_category_to_builder_ids', category)
+
+    def builder_counts(self):
+        return self.get_counts('builder_number')
+
+    def builder_durations(self):
+        return self.get_counts('builder_duration')
+
+    def builder_counts_in_day(self, day):
+        cf = ColumnFamily(self.pool, 'super_counters')
+        return self._all_columns_in_supercolumn_column(cf,
+            'builder_number_by_day', day, values=True)
+
+    def builder_durations_in_day(self, day):
+        cf = ColumnFamily(self.pool, 'super_counters')
+        return self._all_columns_in_supercolumn_column(cf,
+            'builder_duration_by_day', day, values=True)
+
+    def builder_counts_in_category(self, category):
+        cf = ColumnFamily(self.pool, 'super_counters')
+        return self._all_columns_in_supercolumn_column(cf,
+            'builder_number_by_category', category, values=True)
 
     def slaves(self):
         """Obtain basic metadata about all slaves."""
