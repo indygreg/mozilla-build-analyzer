@@ -342,7 +342,7 @@ class DataLoader(object):
             raise Exception('Unknown non-simple field: %s %s' % (k, v))
 
         columns['log_fetch_status'] = ''
-        columns['elapsed'] = unicode(elapsed)
+        columns['duration'] = elapsed
 
         # Look for existing log.
         if 'log_url' in columns:
