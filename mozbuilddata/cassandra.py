@@ -77,6 +77,9 @@ COLUMN_FAMILIES = {
         'key_validation_class': 'UTF8Type',
         'comparator_type': UTF8_TYPE,
         'default_validation_class': 'UTF8Type',
+        'column_validation_classes': {
+            'duration': INT_TYPE,
+        },
     },
     'slaves': {
         'comment': 'Holds information about slaves that run jobs.',
