@@ -79,21 +79,51 @@ class CLI(object):
             else:
                 print(builder_id)
 
-    def builder_median_times(self):
+    def builder_times_statistics(self, category=None, statistic=None):
         builders = self.connection.builders()
-        for builder in sorted(set(t[1] for t in builders)):
-            build_ids = self.connection.build_ids_with_builder_name(builder)
 
+        if category:
+            builders = [t for t in builders if t[2] == category]
+
+        for builder in sorted(set(t[1] for t in builders)):
             times = []
-            for build_id, duration in self.connection.build_durations(build_ids):
+            for build_id, duration in \
+                self.connection.build_durations_with_builder_name(builder):
+
                 times.append(duration)
 
             if not len(times):
                 continue
 
             times = numpy.array(times)
-            median = numpy.median(times)
-            print('%d\t%s' % (median, builder))
+            reverse = False
+
+            if statistic == 'count':
+                value = len(times)
+            elif statistic == 'histogram':
+                counts, bins = numpy.histogram(times, bins=15)
+                values = []
+                for i, count in enumerate(counts):
+                    values.append('%d,%d' % (counts[i], bins[i]))
+                value = '\t'.join(values)
+                reverse = True
+            elif statistic == 'mean':
+                value = numpy.mean(times)
+            elif statistic == 'median':
+                value = numpy.median(times)
+            elif statistic == 'stddev':
+                value = numpy.std(times)
+            elif statistic == 'sum':
+                value = numpy.sum(times)
+            elif statistic == 'variance':
+                value = numpy.var(times)
+            else:
+                raise Exception('Unknown statistic: %s' % statistic)
+
+            if reverse:
+                print('%s\t%s' % (builder, value))
+            else:
+                print('%s\t%s' % (value, builder))
 
     def build_times(self, category=None, builder=None):
         if category and builder:
@@ -284,9 +314,14 @@ def main():
     builders_in_category.add_argument('--print-name', action='store_true',
         help='Whether to print the name of the builder instead of the ID.')
 
-    builder_median_times = subparsers.add_parser('builder-median-times',
-        help='Print the median execution times of builders.')
-    builder_median_times.set_defaults(func='builder_median_times')
+    builder_statistics = subparsers.add_parser('builder-times-statistics',
+        help='Print statistics for builder times.')
+    builder_statistics.set_defaults(func='builder_times_statistics')
+    builder_statistics.add_argument('--statistic', choices=['count',
+        'histogram', 'median', 'mean', 'stddev', 'sum', 'variance'],
+        help='Which statistic to print')
+    builder_statistics.add_argument('--category',
+        help='Limit output to builders in this category.')
 
     build_times = subparsers.add_parser('build-times',
         help='Print times it took builds to run.')

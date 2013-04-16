@@ -306,7 +306,8 @@ class DataLoader(object):
         i_batch.insert('builder_id_to_build_ids', {builder_id: {key: ''}})
 
         elapsed = o['endtime'] - o['starttime']
-        si_batch.insert('build_id_to_duration', {key: unicode(elapsed)})
+        s_elapsed = unicode(elapsed)
+        si_batch.insert('build_id_to_duration', {key: s_elapsed})
 
         columns = {}
         for k, v in o.items():
@@ -360,6 +361,13 @@ class DataLoader(object):
 
             i_batch.insert('builder_category_to_build_ids', {cat: {key: ''}})
             i_batch.insert('builder_name_to_build_ids', {name: {key: ''}})
+
+            i_batch.insert('build_duration_by_builder_id', {builder_id: {key:
+                s_elapsed}})
+            i_batch.insert('build_duration_by_builder_name', {name: {key:
+                s_elapsed}})
+            i_batch.insert('build_duration_by_builder_category', {cat: {key:
+                s_elapsed}})
 
             counters['builder_number'].update([name])
             counters['builder_duration'][name] += elapsed

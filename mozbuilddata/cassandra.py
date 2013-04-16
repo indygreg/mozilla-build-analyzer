@@ -164,6 +164,9 @@ BUILD_METADATA_SUPER_COUNTERS = [
     'builder_duration_by_category',
     'builder_number_by_day_and_category',
     'builder_duration_by_day_and_category',
+    'build_duration_by_builder_id',
+    'build_duration_by_builder_name',
+    'build_duration_by_builder_category',
 ]
 
 LOG_METADATA_INDICES = [
@@ -481,6 +484,14 @@ class Connection(object):
         for col, value in values:
             yield col, int(value)
 
+    def build_durations_with_builder_name(self, builder):
+        cf = ColumnFamily(self.pool, 'indices')
+
+        for col, value in self._all_columns_in_supercolumn_column(cf,
+            'build_duration_by_builder_name', builder, values=True):
+
+            yield col, int(value)
+
     def build_log(self, build_id):
         """Obtain the raw log for a job from its ID."""
         info = self.build_from_id(build_id)
@@ -555,7 +566,7 @@ class Connection(object):
         except NotFoundException:
             pass
 
-    def _all_columns_in_supercolumn_column(self, cf, key, column):
+    def _all_columns_in_supercolumn_column(self, cf, key, column, values=False):
         """Generator for the names of all columns in a supercolumn column."""
 
         try:
@@ -564,8 +575,12 @@ class Connection(object):
                 result = cf.get(key, column_start=start_column, column_finish='',
                     super_column=column, column_count=1000)
 
-                for column_name in result.keys():
-                    yield column_name
+                for column_name, column_value in result.iteritems():
+                    if values:
+                        yield column_name, column_value
+                    else:
+                        yield column_name
+
                     start_column = column_name
 
                 if len(result) != 1000:
