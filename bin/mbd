@@ -215,6 +215,12 @@ class CLI(object):
             print('%s\t%d\t%d\t%d\t%.1f' % (slave_name, total, used, unused,
                 efficiency))
 
+    def file_sizes(self):
+        for filename in self.connection.filenames():
+            info = self.connection.file_metadata([filename])[filename]
+
+            print('%s\t%d\t%d' % (filename, info['size'],
+                info['compressed_size']))
 
 
 def main():
@@ -333,6 +339,10 @@ def main():
     slave_efficiencies = subparsers.add_parser('slave-efficiencies',
         help='Obtain information about the efficiency of all slaves.')
     slave_efficiencies.set_defaults(func='slave_efficiencies')
+
+    file_sizes = subparsers.add_parser('file-sizes',
+        help='Print all files and their sizes.')
+    file_sizes.set_defaults(func='file_sizes')
 
     args = parser.parse_args()
 
