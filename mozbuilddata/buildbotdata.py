@@ -196,7 +196,7 @@ class DataLoader(object):
 
         fetcher = ParallelHttpFetcher()
 
-        for build_id in sorted(possible_build_ids, reverse=True):
+        for build_id in sorted(possible_build_ids):
             info = self._connection.build_from_id(build_id)
             if not info:
                 continue
