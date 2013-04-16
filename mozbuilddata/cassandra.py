@@ -225,7 +225,7 @@ class Connection(object):
                 manager.alter_column(keyspace, name, column, column_type)
 
         self.pool = pycassa.pool.ConnectionPool(keyspace, server_list=servers,
-            timeout=30, *args, **kwargs)
+            timeout=90, pool_size=15, *args, **kwargs)
 
     def store_blob(self, key, content, chunk_size=DEFAULT_BLOB_CHUNK_SIZE):
         cf = ColumnFamily(self.pool, 'blobs')
