@@ -243,6 +243,9 @@ class DataLoader(object):
         indices = ColumnFamily(self._pool, 'indices')
         i_batch = indices.batch()
 
+        simple_indices = ColumnFamily(self._pool, 'simple_indices')
+        si_batch = simple_indices.batch()
+
         # We defer counter inserts until then end because Python
         # increments are cheaper than Cassandra increments (hopefully).
         counters = {
@@ -259,11 +262,12 @@ class DataLoader(object):
         existing_filenames = set(self._connection.filenames())
 
         for build in o:
-            self._load_build(batch, i_batch, counters, build, builders,
-                existing_filenames)
+            self._load_build(batch, i_batch, si_batch, counters, build,
+                builders, existing_filenames)
 
         batch.send()
         i_batch.send()
+        si_batch.send()
 
         cf = ColumnFamily(self._pool, 'counters')
         for builder, count in counters['builder_number'].items():
@@ -283,7 +287,7 @@ class DataLoader(object):
 
         return len(o)
 
-    def _load_build(self, batch, i_batch, counters, o, builders,
+    def _load_build(self, batch, i_batch, si_batch, counters, o, builders,
         existing_filenames):
 
         key = str(o['id'])
@@ -298,6 +302,7 @@ class DataLoader(object):
         i_batch.insert('builder_id_to_build_ids', {builder_id: {key: ''}})
 
         elapsed = o['endtime'] - o['starttime']
+        si_batch.insert('build_id_to_duration', {key: unicode(elapsed)})
 
         columns = {}
         for k, v in o.items():
@@ -333,6 +338,7 @@ class DataLoader(object):
             raise Exception('Unknown non-simple field: %s %s' % (k, v))
 
         columns['log_fetch_status'] = ''
+        columns['elapsed'] = unicode(elapsed)
 
         # Look for existing log.
         if 'log_url' in columns:

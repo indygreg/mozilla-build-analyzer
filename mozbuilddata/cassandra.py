@@ -143,6 +143,7 @@ BUILD_METADATA_INDICES = [
     'builder_id_to_build_ids',
     'builder_id_to_slave_ids',
     'builder_name_to_build_ids',
+    'build_id_to_duration',
     'master_id_to_build_ids',
     'master_id_to_slave_ids',
     'slave_id_to_build_ids',
@@ -466,6 +467,17 @@ class Connection(object):
         except NotFoundException:
             return None
 
+    def build_durations(self, build_ids=None):
+        cf = ColumnFamily(self.pool, 'simple_indices')
+
+        if build_ids is None:
+            values = self._all_columns_in_row(cf, 'build_id_to_duration')
+        else:
+            values = self._column_values(cf, 'build_id_to_duration', build_ids)
+
+        for col, value in values:
+            yield col, int(value)
+
     def build_log(self, build_id):
         """Obtain the raw log for a job from its ID."""
         info = self.build_from_id(build_id)
@@ -495,6 +507,29 @@ class Connection(object):
 
                 if len(result) != 1000:
                     break
+
+        except NotFoundException:
+            pass
+
+    def _column_values(self, cf, key, columns):
+        try:
+            fetch = []
+            for column in columns:
+                fetch.append(column)
+
+                if len(fetch) == 1000:
+                    result = cf.get(key, columns=fetch)
+
+                    for col in fetch:
+                        yield col, result.get(col, None)
+
+                    fetch = []
+
+            if len(fetch):
+                result = cf.get(key, columns=fetch)
+
+                for col in fetch:
+                    yield col, result.get(col, None)
 
         except NotFoundException:
             pass
