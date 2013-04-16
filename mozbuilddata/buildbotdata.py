@@ -205,6 +205,10 @@ class DataLoader(object):
                 fetched_count += 1
                 continue
 
+            if info['log_url'].startswith('https://pvtbuilds2.dmz.scl3.mozilla.com'):
+                excluded_count += 1
+                continue
+
             if after and 'starttime' in info and int(info['starttime']) < after:
                 excluded_count += 1
                 continue
