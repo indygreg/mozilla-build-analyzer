@@ -147,9 +147,16 @@ BUILD_METADATA_INDICES = [
     'builder_id_to_slave_ids',
     'builder_name_to_build_ids',
     'build_id_to_duration',
+    'build_duration_by_builder_id',
+    'build_duration_by_builder_category',
+    'build_duration_by_builder_name',
     'master_id_to_build_ids',
     'master_id_to_slave_ids',
     'slave_id_to_build_ids',
+]
+
+BUILD_METADATA_SIMPLE_INDICES = [
+    'build_id_to_duration',
 ]
 
 BUILD_METADATA_COUNTERS = [
@@ -370,6 +377,10 @@ class Connection(object):
 
         cf = ColumnFamily(self.pool, 'indices')
         for key in BUILD_METADATA_INDICES:
+            cf.remove(key)
+
+        cf = ColumnFamily(self.pool, 'simple_indices')
+        for key in BUILD_METADATA_SIMPLE_INDICES:
             cf.remove(key)
 
         cf = ColumnFamily(self.pool, 'counters')
