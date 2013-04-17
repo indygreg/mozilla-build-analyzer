@@ -36,7 +36,7 @@ RE_BUILD_LISTING_ENTRY = re.compile(r'''
     \s+
     (?P<date>\d{2}-[^-]+-\d{4}\s\d{2}:\d{2})
     \s+
-    (?P<size>\d+)
+    (?P<size>[\d-]+)
     $''', re.VERBOSE)
 
 def available_build_files():
@@ -55,6 +55,9 @@ def available_build_files():
         d = match.groupdict()
 
         if d['path'].endswith('.tmp'):
+            continue
+
+        if d['size'] == '-':
             continue
 
         t = datetime.datetime.strptime(d['date'], '%d-%b-%Y %H:%M')
