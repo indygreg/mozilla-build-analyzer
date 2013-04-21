@@ -368,6 +368,8 @@ def main():
             'regard to character case.')
     build_logs_synchronize.add_argument('--category',
         help='Only consider builds in this category.')
+    build_logs_synchronize.add_argument('--before',
+        help='Only load logs from builds before this date (YYYY-MM-DD).')
     build_logs_synchronize.add_argument('--after',
         help='Only load logs from builds after this date (YYYY-MM-DD).')
 
