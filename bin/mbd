@@ -125,6 +125,16 @@ class CLI(object):
             else:
                 print('%s\t%s' % (value, builder))
 
+    def build_info(self, build_id):
+        for bid in build_id:
+            info = self.connection.build_from_id(bid)
+            if not info:
+                print('No info found for id %s' % bid)
+                continue
+            print('Build id %s' % bid)
+            for key in info:
+                print('  %s: %s' % (key, info[key]))
+
     def build_times(self, category=None, builder=None):
         if category and builder:
             print('Cannot specify both --category and explicit builders.')
@@ -329,6 +339,12 @@ def main():
         help='Which statistic to print')
     builder_statistics.add_argument('--category',
         help='Limit output to builders in this category.')
+
+    build_info = subparsers.add_parser('build-info',
+        help='Print info about a paritcular build.')
+    build_info.set_defaults(func='build_info')
+    build_info.add_argument('build_id', nargs='+',
+        help='The ID of the build whose info to print.')
 
     build_times = subparsers.add_parser('build-times',
         help='Print times it took builds to run.')
