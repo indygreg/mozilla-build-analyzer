@@ -8,6 +8,7 @@ from __future__ import print_function, unicode_literals
 import argparse
 import calendar
 import datetime
+import fnmatch
 import numpy
 import operator
 import sys
@@ -188,6 +189,36 @@ class CLI(object):
         builder_ids = self.connection.build_ids_with_builder_name(builder_name)
         for build_id in sorted(builder_ids):
             print(build_id)
+
+    def builds_for_revision(self, revision, category=None, builder_pattern=None):
+        # TODO refactor this so that it shares code with the build_logs_synchronize
+        # codepath
+        if not category and not builder_pattern:
+            raise Exception('You must limit to a category or builder pattern.')
+
+        possible_build_ids = set()
+
+        if category:
+            possible_build_ids |= \
+                set(self.connection.build_ids_in_category(category))
+
+        if builder_pattern:
+            builders = list(self.connection.builders())
+            builder_names = set(t[1] for t in builders)
+            for builder_name in builder_names:
+                if not fnmatch.fnmatch(builder_name.lower(),
+                    builder_pattern.lower()):
+                    continue
+
+                possible_build_ids |= \
+                    set(self.connection.build_ids_with_builder_name(builder_name))
+
+        for build_id in sorted(possible_build_ids):
+            info = self.connection.build_from_id(build_id)
+            if not info:
+                continue
+            if 'revision' in info and info['revision'].startswith(revision):
+                print(build_id)
 
     def build_counts_by_builder(self):
         counts = dict(self.connection.get_counts('builder_number'))
@@ -370,6 +401,18 @@ def main():
     builds_for_builder.set_defaults(func='builds_for_builder')
     builds_for_builder.add_argument('builder_name',
         help='Name of the builder to show builds for.')
+
+    builds_for_revision = subparsers.add_parser('builds-for-revision',
+        help='List all builds belonging to a given hg revision.')
+    builds_for_revision.set_defaults(func='builds_for_revision')
+    builds_for_revision.add_argument('--category',
+        help='Only consider builds in this category.')
+    builds_for_revision.add_argument('--builder-pattern',
+        help='Only consider builds for builders matching this pattern. The pattern '
+            'is a UNIX shell glob style pattern match, performed without '
+            'regard to character case.')
+    builds_for_revision.add_argument('revision',
+        help='A prefix of the hg revision to show builds for.')
 
     build_counts_by_builder = subparsers.add_parser('build-counts-by-builder',
         help='List counts of builds grouped by builder name.')
