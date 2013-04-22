@@ -142,11 +142,13 @@ class DataLoader(object):
         yield 'Loaded %d builds' % self.load_builds(obj['builds'],
             obj['builders'])
 
-    def load_missing_logs(self, category=None, builder_pattern=None, after=None):
+    def load_missing_logs(self, category=None, builder_pattern=None, before=None, after=None):
         """Loads all logs that aren't currently in storage."""
 
         if isinstance(after, basestring):
             after = calendar.timegm(time.strptime(after, '%Y-%m-%d'))
+        if isinstance(before, basestring):
+            before = calendar.timegm(time.strptime(before, '%Y-%m-%d'))
 
         if not category and not builder_pattern:
             raise Exception('You must limit to a category or builder pattern.')
@@ -213,6 +215,10 @@ class DataLoader(object):
                 continue
 
             if after and 'starttime' in info and int(info['starttime']) < after:
+                excluded_count += 1
+                continue
+
+            if before and 'endtime' in info and int(info['endtime']) > before:
                 excluded_count += 1
                 continue
 
