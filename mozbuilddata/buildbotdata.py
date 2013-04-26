@@ -275,60 +275,117 @@ class DataLoader(object):
         c.close()
         return len(o)
 
+    # Maps properties from builds into column names.
     BUILD_PROPERTIES = dict(
-        builder_name='buildername',
-        app_name='appName',
-        app_version='appVersion',
-        base_dir='basedir',
+        buildername='builder_name',
+        app='app',
+        appName='app_name',
+        appVersion='app_version',
+        basedir='base_dir',
         branch='branch',
-        build_dir='builddir',
         build_filename='build_filename',
-        build_id='buildid',
-        build_uid='builduid',
         build_url='build_url',
+        builddir='build_dir',
+        buildid='build_id',
+        buildnumber='build_number',
+        builduid='build_uid',
         comments='comments',
-        exe_dir='exedir',
-        file_path='filepath',
+        comm_revision='comm_revision',
+        compare_locales_revision='compare_locales_revision',
+        completeMarFilename='complete_mar_filename',
+        completeMarHash='complete_mar_hash',
+        completeMarSize='complete_mar_size',
+        completeMarUrl='complete_mar_url',
+        completesnippetFilename='complete_snippet_filename',
+        configFile='config_file',
+        configRevision='config_revision',
+        en_revision='en_revision',
+        exedir='exe_dir',
+        exepath='exe_path',
+        fennec_ids_filename='fennec_ids_filename',
+        fennec_ids_url='fennec_ids_url',
+        filename='filename',
+        filepath='file_path',
+        fileURL='file_url',
         foopy_type='foopy_type',
         forced_clobber='forced_clobber',
-        got_revisions='got_revisions',
-        hash_type='hashType',
+        fx_revision='fx_revision',
+        gaia_revision='gaia_revision',
+        gecko_revision='gecko_revision',
+        got_revision='got_revision',
+        hashType='hash_type',
         http_port='http_port',
         hostutils_filename='hostutils_filename',
         hostutils_url='hostutils_url',
-        js_shell_url='jsshellUrl',
+        inipath='ini_path',
+        installerHash='installer_hash',
+        installerFilename='installer_filename',
+        installerSize='installer_size',
+        jsshellUrl='js_shell_url',
+        l10n_revision='l10n_revision',
+        locale='locale',
         log_url='log_url',
-        master_url='master',
+        master='master_url',
+        mozmillVirtualenvSetup='mozmill_virtualenv_setup',
+        moz_revision='moz_revision',
         num_ctors='num_ctors',
-        package_filename='packageFilename',
-        package_hash='packageHash',
-        package_size='packageSize',
-        package_url='packageUrl',
+        nightly_build='nightly_build',
+        packageFilename='package_filename',
+        packageHash='package_hash',
+        packageSize='package_size',
+        packageUrl='package_url',
+        partialMarFilename='partial_mar_filename',
+        partialMarHash='partial_mar_hash',
+        partialMarSize='partial_mar_size',
+        partialMarUrl='partial_mar_url',
+        partialsnippetFilename='partial_snippet_filename',
         periodic_clobber='periodic_clobber',
         pgo_build='pgo_build',
         platform='platform',
+        previousMarFilename='previous_mar_filename',
+        previous_buildid='previous_build_id',
+        previous_inipath='previous_ini_path',
         product='product',
+        products='products',
         project='project',
         purge_actual='purge_actual',
         purge_target='purge_target',
         purged_clobber='purged_clobber',
         reason='reason',
+        release_config='release_config',
+        release_tag='release_tag',
+        remoteProcessName='remote_process_name',
         revision='revision',
         request_ids='request_ids',
         repo_path='repo_path',
         repository='repository',
+        robocopApkUrl='robocop_apk_url',
         robocop_filename='robocop_filename',
         robocop_url='robocop_url',
         scheduler='scheduler',
-        slave_build_dir='slavebuilddir',
-        slave_name='slavename',
+        script_repo_revision='script_repo_revision',
+        slavebuilddir='slave_build_dir',
+        slavename='slave_name',
+        slowTests='slow_tests',
         sourcestamp='sourcestamp',
         ssl_port='ssl_port',
         stage_platform='stage_platform',
-        symbols_url='symbolsUrl',
+        sut_ip='sut_ip',
+        symbolsFile='symbols_filename',
+        symbols_filename='symbols_filename',
+        symbolsUrl='symbols_url',
+        symbols_url='symbols_url',
         tests_filename='tests_filename',
-        tests_url='testsUrl',
-        tools_dir='toolsdir',
+        testsUrl='tests_url',
+        tests_url='tests_url',
+        toolsdir='tools_dir',
+        tree='tree',
+        unsignedApkUrl='unsigned_apk_url',
+        upload_host='upload_host',
+        upload_sshkey='upload_ssh_key',
+        upload_user='upload_user',
+        version='version',
+        vsize='vsize',
         who='who',
     )
 
@@ -391,39 +448,39 @@ class DataLoader(object):
             start_day_ts = (start_day - epoch).total_seconds()
             duration = build['endtime'] - build['starttime']
 
-            c.execute_prepared(q_add_to_builder,
-                dict(id=builder_id, build_ids=[bid]))
+            #c.execute_prepared(q_add_to_builder,
+            #    dict(id=builder_id, build_ids=[bid]))
 
-            c.execute_prepared(q_add_to_slave,
-                dict(id=slave_id, build_ids=[bid]))
+            #c.execute_prepared(q_add_to_slave,
+            #    dict(id=slave_id, build_ids=[bid]))
 
-            c.execute_prepared(q_add_events_to_slave,
-                dict(id=slave_id,
-                    start=build['starttime'], start_value='start-%d' % bid,
-                    end=build['endtime'], end_value='end-%d' % bid))
+            #c.execute_prepared(q_add_events_to_slave,
+            #    dict(id=slave_id,
+            #        start=build['starttime'], start_value='start-%d' % bid,
+            #        end=build['endtime'], end_value='end-%d' % bid))
 
-            c.execute_prepared(q_add_builder_count, dict(id=builder_id))
-            c.execute_prepared(q_add_builder_duration, dict(
-                id=builder_id, duration=duration))
+            #c.execute_prepared(q_add_builder_count, dict(id=builder_id))
+            #c.execute_prepared(q_add_builder_duration, dict(
+            #    id=builder_id, duration=duration))
 
-            c.execute_prepared(q_add_daily_builder_count, dict(
-                id=builder_id, day=start_day_ts))
+            #c.execute_prepared(q_add_daily_builder_count, dict(
+            #    id=builder_id, day=start_day_ts))
 
-            c.execute_prepared(q_add_daily_builder_duration, dict(
-                id=builder_id, day=start_day_ts, d=duration))
+            #c.execute_prepared(q_add_daily_builder_duration, dict(
+            #    id=builder_id, day=start_day_ts, d=duration))
 
-            c.execute_prepared(q_add_category_count, dict(
-                category=builder['category']))
+            #c.execute_prepared(q_add_category_count, dict(
+            #    category=builder['category']))
 
-            c.execute_prepared(q_add_category_duration, dict(
-                category=builder['category'], d=duration))
+            #c.execute_prepared(q_add_category_duration, dict(
+            #    category=builder['category'], d=duration))
 
-            c.execute_prepared(q_add_daily_category_count, dict(
-                category=builder['category'], day=start_day_ts))
+            #c.execute_prepared(q_add_daily_category_count, dict(
+            #    category=builder['category'], day=start_day_ts))
 
-            c.execute_prepared(q_add_daily_category_duration, dict(
-                category=builder['category'], day=start_day_ts,
-                d=duration))
+            #c.execute_prepared(q_add_daily_category_duration, dict(
+            #    category=builder['category'], day=start_day_ts,
+            #    d=duration))
 
             p = dict(
                 id=bid,
@@ -440,9 +497,40 @@ class DataLoader(object):
                 result=build['result'],
             )
 
-            v = self.BUILD_PROPERTIES.values()
             for k in props:
-                if k not in v:
+                # This is almost always 1 but it is different from the
+                # top-level buildnumber.
+                if k == 'build_number':
+                    continue
+
+                if k == 'request_ids':
+                    p['request_ids'] = props[k]
+                    continue
+
+                if k == 'request_times':
+                    # TODO
+                    continue
+
+                if k == 'testresults':
+                    # TODO
+                    continue
+
+                if k == 'leakStats':
+                    # TODO
+                    continue
+
+                if k == 'locales':
+                    p['locales'] = props[k]
+                    continue
+
+                # No clue what this is for. It looks like a bug.
+                if k == 'make.py[0]:':
+                    continue
+
+                if k.endswith('_failure'):
+                    continue
+
+                if k not in self.BUILD_PROPERTIES:
                     print(k)
 
         return len(o)
