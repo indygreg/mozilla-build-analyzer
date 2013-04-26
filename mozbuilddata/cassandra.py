@@ -4,8 +4,11 @@
 
 from __future__ import unicode_literals
 
-import gzip
+import bz2
+import cql
+import datetime
 import hashlib
+import zlib
 
 import pycassa
 
@@ -26,74 +29,6 @@ from pycassa import NotFoundException
 
 
 COLUMN_FAMILIES = {
-    # Blobs are where we store large, seldomly read and written binary blobs
-    # of data. This is where we put raw build logs and summaries of builds.
-    'blobs': {
-        'comment': 'Holds opaque binary blobs.',
-        'key_validation_class': 'UTF8Type',
-        'comparator_type': 'UTF8Type',
-        'default_validation_class': 'BytesType',
-        'column_validation_classes': {
-            'version': INT_TYPE,
-            'sha1': BYTES_TYPE,
-            'size': INT_TYPE,
-            'chunk_count': INT_TYPE,
-            'chunk_size': INT_TYPE,
-        },
-        # While slower, the DeflateCompressor gives much better compression
-        # for what we store in here (logs) than Snappy (2-2.5x better).
-        'compression_options': {
-            'sstable_compression': 'DeflateCompressor',
-            'chunk_length_kb': '512',
-        },
-    },
-    # Files are essentially an index into blobs. They are where we record which
-    # files have been fetched and their state in the blobs column family. There
-    # is significant overlap between the metadata in here and blobs. The reason
-    # is this column is quick to read from because rows are small. Blobs should
-    # only be read when accessing the content of a specific file.
-    'files': {
-        'comment': 'Stores raw files.',
-        'key_validation_class': 'UTF8Type',
-        'comparator_type': UTF8_TYPE,
-        'default_validation_class': 'UTF8Type',
-        'column_validation_classes': {
-            'version': INT_TYPE,
-            'sha1': BYTES_TYPE,
-            'size': INT_TYPE,
-            'mtime': DATE_TYPE,
-            'compression_state': UTF8_TYPE,
-            'compressed_size': INT_TYPE,
-        },
-    },
-    'builders': {
-        'comment': 'Information about different job types (builders).',
-        'key_validation_class': 'UTF8Type',
-        'comparator_type': UTF8_TYPE,
-        'default_validation_class': 'UTF8Type',
-    },
-    'builds': {
-        'comment': 'Holds information about specific build jobs.',
-        'key_validation_class': 'UTF8Type',
-        'comparator_type': UTF8_TYPE,
-        'default_validation_class': 'UTF8Type',
-        'column_validation_classes': {
-            'duration': INT_TYPE,
-        },
-    },
-    'slaves': {
-        'comment': 'Holds information about slaves that run jobs.',
-        'key_validation_class': 'UTF8Type',
-        'comparator_type': UTF8_TYPE,
-        'default_validation_class': 'UTF8Type',
-    },
-    'masters': {
-        'comment': 'Describes buildbot masters.',
-        'key_validation_class': 'UTF8Type',
-        'comparator_type': UTF8_TYPE,
-        'default_validation_class': 'UTF8Type',
-    },
-
     # Derived data.
 
     # We have a catch-all super column family for useful indices. Keys are
@@ -128,20 +63,210 @@ COLUMN_FAMILIES = {
         'subcomparator_type': UTF8_TYPE,
         'default_validation_class': 'CounterColumnType',
     },
-    'build_timelines': {
-        'comment': 'Records information about various phases of builds.',
-        'column_type': 'Super',
-        'key_validation_class': 'UTF8Type',
-        'comparator_type': LONG_TYPE,
-        'subcomparator_type': UTF8_TYPE,
-        'default_validation_class': 'UTF8Type',
-    },
+}
+
+TABLES = {
+    'builders': b'''
+        CREATE TABLE builders (
+            id int PRIMARY KEY,
+            name text,
+            category text,
+            master int,
+            slaves set<int>,
+            builds set<int>,
+        )
+        WITH comment='Describes individual job types.'
+    ''',
+
+    'builder_counters': b'''
+        CREATE TABLE builder_counters (
+            id int PRIMARY KEY,
+            total_number counter,
+            total_duration counter,
+        )
+        WITH comment='Builder ID to builder number counter.'
+    ''',
+
+    'builder_daily_counters': b'''
+        CREATE TABLE builder_daily_counters (
+            id int,
+            day timestamp,
+            number counter,
+            duration counter,
+            PRIMARY KEY (id, day),
+        )
+        WITH comment='Builder ID to per-day counters.'
+    ''',
+
+    'builder_category_counters': b'''
+        CREATE TABLE builder_category_counters (
+            category text PRIMARY KEY,
+            number counter,
+            duration counter,
+        )
+        WITH comment='Builder category to counters.'
+    ''',
+
+    'builder_category_daily_counters': b'''
+        CREATE TABLE builder_category_daily_counters (
+            category text,
+            day timestamp,
+            number counter,
+            duration counter,
+            PRIMARY KEY (category, day),
+        )
+        WITH comment='Builder category and day to counters.'
+    ''',
+
+    'slaves': b'''
+        CREATE TABLE slaves (
+            id int PRIMARY KEY,
+            name text,
+            builds set<int>,
+            build_events map<timestamp, text>,
+        )
+        WITH comment='Describes machines that execute jobs.'
+    ''',
+
+    'masters': b'''
+        CREATE TABLE masters (
+            id int PRIMARY KEY,
+            name text,
+            url text,
+            builders set<int>,
+        )
+        WITH comment='Describes machines coordinating slaves.'
+    ''',
+
+    'builds': b'''
+        CREATE TABLE builds (
+            id int PRIMARY KEY,
+            builder_id int,
+            builder_name text,
+            builder_name_printed text,
+            builder_category text,
+            build_number int,
+            master_id int,
+            master_url text,
+            slave_id int,
+            slave_name text,
+            request_time timestamp,
+            start_time timestamp,
+            end_time timestamp,
+            duration int,
+            result int,
+            app_name text,
+            app_version text,
+            base_dir text,
+            branch text,
+            build_dir text,
+            build_id text,
+            build_filename text,
+            build_url text,
+            build_uid text,
+            comments text,
+            exe_dir text,
+            file_path text,
+            foopy_type text,
+            forced_clobber boolean,
+            got_revisions text,
+            hash_type text,
+            hostutils_filename text,
+            hostutils_url text,
+            http_port int,
+            js_shell_url text,
+            log_url text,
+            num_ctors int,
+            package_filename text,
+            package_hash text,
+            package_size int,
+            package_url text,
+            periodic_clobber boolean,
+            pgo_build boolean,
+            platform text,
+            product text,
+            project text,
+            purge_actual text,
+            purge_target text,
+            purged_clobber boolean,
+            repository text,
+            repo_path text,
+            request_ids set<int>,
+            revision text,
+            robocop_filename text,
+            robocop_url text,
+            scheduler text,
+            slave_build_dir text,
+            sourcestamp text,
+            ssl_port int,
+            stage_platform text,
+            sut_ip inet,
+            symbols_url text,
+            tests_filename text,
+            tests_url text,
+            tools_dir text,
+            reason text,
+            who text,
+        )
+        WITH comment='Describes individual build jobs.'
+    ''',
+
+    # Files are essentially an index into blobs. They are where we record which
+    # files have been fetched and their state in the blobs column family. There
+    # is significant overlap between the metadata in here and blobs. The reason
+    # is this column is quick to read from because rows are small. Blobs should
+    # only be read when accessing the content of a specific file.
+    'files': b'''
+        CREATE TABLE files (
+            name text PRIMARY KEY,
+            version varint,
+            mtime timestamp,
+            stored_sha1 blob,
+            stored_size varint,
+            transformation text,
+            original_size varint,
+            original_sha1 blob,
+            chunk_count varint,
+            chunk_size varint,
+        )
+        WITH comment='Stored files (logs, packages, etc.)'
+    ''',
+
+    # Blobs are where we store large, seldomly read and written binary blobs
+    # of data. This is where we put raw build logs and summaries of builds.
+    # While slower, the DeflateCompressor gives much better compression
+    # for what we store in here (logs) than Snappy (2-2.5x better).
+    'file_chunks': b'''
+        CREATE TABLE file_chunks (
+            name text,
+            i int,
+            chunk blob,
+            PRIMARY KEY (name, i)
+        )
+        WITH comment='Holds opaque binary chunks belonging to files.'
+        AND compression = {'sstable_compression': ''}
+    ''',
+
+}
+
+INDICES = {
+    'builder_category': b'CREATE INDEX builder_category ON builders (category)',
 }
 
 COLUMN_TYPES = {}
 
+BUILDER_TABLES = [
+    b'masters',
+    b'slaves',
+    b'builders',
+    b'builder_counters',
+    b'builder_daily_counters',
+    b'builder_category_counters',
+    b'builder_category_daily_counters',
+    b'builds',
+]
+
 BUILD_METADATA_INDICES = [
-    'builder_category_to_builder_ids',
     'builder_category_to_build_ids',
     'builder_id_to_build_ids',
     'builder_id_to_slave_ids',
@@ -151,26 +276,13 @@ BUILD_METADATA_INDICES = [
     'build_duration_by_builder_category',
     'build_duration_by_builder_name',
     'master_id_to_build_ids',
-    'master_id_to_slave_ids',
-    'slave_id_to_build_ids',
 ]
 
 BUILD_METADATA_SIMPLE_INDICES = [
     'build_id_to_duration',
 ]
 
-BUILD_METADATA_COUNTERS = [
-    'builder_number',
-    'builder_duration',
-]
-
 BUILD_METADATA_SUPER_COUNTERS = [
-    'builder_number_by_day',
-    'builder_duration_by_day',
-    'builder_number_by_category',
-    'builder_duration_by_category',
-    'builder_number_by_day_and_category',
-    'builder_duration_by_day_and_category',
     'build_duration_by_builder_id',
     'build_duration_by_builder_name',
     'build_duration_by_builder_category',
@@ -196,10 +308,53 @@ LOG_METADATA_SUPER_COUNTERS = [
 
 DEFAULT_BLOB_CHUNK_SIZE = 1048576
 
-class Connection(object):
 
-    def __init__(self):
-        self.pool = None
+def connect(host, port, keyspace, *args, **kwargs):
+    c = cql.connect(host, port, keyspace, cql_version='3.0.0', *args, **kwargs)
+
+    pool = pycassa.pool.ConnectionPool(keyspace, server_list=[host],
+        timeout=90, pool_size=15, *args, **kwargs)
+
+    return Connection(c, pool)
+
+
+class Connection(object):
+    def __init__(self, connection, pool):
+        self.c = connection
+        self.pool = pool
+
+        c = self.c.cursor()
+        c.execute(b'SELECT * from system.schema_keyspaces WHERE keyspace_name=:ks',
+            {'ks':connection.keyspace})
+        if not c.rowcount:
+            raise Exception('Please create the %s keyspace.' %
+                connection.keyspace)
+
+        c = self.c.cursor()
+        c.execute(b'SELECT columnfamily_name FROM system.schema_columnfamilies '
+            b'WHERE keyspace_name=:ks', {'ks': self.c.keyspace})
+        cf_names = set()
+        for row in c:
+            cf_names.add(row[0])
+
+        for table, create in TABLES.items():
+            if table not in cf_names:
+                c.execute(create)
+
+        c.execute(b'SELECT index_name FROM system.schema_columns '
+            b'WHERE keyspace_name=:ks', {'ks': self.c.keyspace})
+        indices = set()
+        for row in c:
+            indices.add(row[0])
+
+        for index, create in INDICES.items():
+            if index not in indices:
+                c.execute(create)
+
+        c.close()
+
+    def cursor(self):
+        return self.c.cursor()
 
     def connect(self, keyspace, *args, **kwargs):
         """Connect to a Cassandra cluster and ensure state is sane."""
@@ -237,133 +392,135 @@ class Connection(object):
         self.pool = pycassa.pool.ConnectionPool(keyspace, server_list=servers,
             timeout=90, pool_size=15, *args, **kwargs)
 
-    def store_blob(self, key, content, chunk_size=DEFAULT_BLOB_CHUNK_SIZE):
-        cf = ColumnFamily(self.pool, 'blobs')
-        chunks = len(content) / chunk_size + 1
+    def get_file(self, name):
+        info = self.file_metadata(name)
 
+        if not info:
+            return None
+
+        raw = self.get_file_content(name)
+        if len(raw) != info['stored_size']:
+            raise Exception('Length of retrieved file differs from record: '
+                '%d != %d' % (len(raw), info['stored_size']))
+
+        sha1 = hashlib.sha1(raw)
+        if sha1.digest() != info['stored_sha1']:
+            raise Exception('SHA-1 verification failed.')
+
+        if info['transformation'] in ('zlib', 'gzip'):
+            raw = zlib.decompress(raw)
+        elif info['transformation'] == 'bzip2':
+            raw = bzip2.decompress(raw)
+
+        if info['original_size']:
+            if len(raw) != info['original_size']:
+                raise Exception('Original file size does not match: '
+                    '%d != %d' % (len(raw), info['original_size']))
+
+        if info['original_sha1']:
+            sha1 = hashlib.sha1(raw)
+            if sha1.digest() != info['original_sha1']:
+                raise Exception('Original SHA-1 mismatch.')
+
+        return raw
+
+    def get_file_content(self, key):
+        c = self.c.cursor()
+
+        c.execute(b'SELECT i, chunk FROM file_chunks WHERE name = :name '
+            b'ORDER BY i ASC', {'name': key})
+
+        chunks = []
+        expected = 1
+        for i, chunk in c:
+            if i != expected:
+                raise Exception('Missing file chunk: %d' % i)
+
+            expected += 1
+            chunks.append(chunk)
+
+        return b''.join(chunks)
+
+    def store_file(self, filename, content, mtime=-1, transformation=None,
+        original_size=None, original_sha1=None):
+
+        transformation = transformation or 'none'
+        assert transformation in ('none', 'gzip', 'bzip2', 'zlib')
+
+        if isinstance(mtime, datetime.datetime):
+            epoch = datetime.datetime.utcfromtimestamp(0)
+            delta = mtime - epoch
+            mtime = delta.total_seconds()
+
+        chunk_count = len(content) / DEFAULT_BLOB_CHUNK_SIZE + 1
         sha1 = hashlib.sha1()
         sha1.update(content)
+
+        c = self.c.cursor()
+        q_insert_chunk = c.prepare_query(b'INSERT INTO file_chunks '
+            b'(name, i, chunk) VALUES (:name, :i, :chunk)')
+
+        q = c.prepare_query(b'INSERT INTO files (name, version, mtime, '
+            b'stored_size, stored_sha1, '
+            b'transformation, original_size, original_sha1, '
+            b'chunk_count, chunk_size) '
+            b'VALUES (:name, 1, :mtime, :stored_size, :stored_sha1, '
+            b':transformation, :original_size, :original_sha1, '
+            b':chunk_count, :chunk_size)')
 
         offset = 0
         i = 1
         while True:
-            b = content[offset:offset + chunk_size]
-            # We prefix each part with "z" so the big chunks come at the end of
-            # the row and our initial read for all the metadata doesn't span
-            # excessive pages on disk.
-            cf.insert(key, {'z:%04d' % i: b})
+            b = content[offset:offset + DEFAULT_BLOB_CHUNK_SIZE]
 
-            if len(b) < chunk_size:
+            c.execute_prepared(q_insert_chunk, dict(
+                name=filename, i=i, chunk=b))
+
+            if len(b) < DEFAULT_BLOB_CHUNK_SIZE:
                 break
 
-            offset += chunk_size
+            offset += DEFAULT_BLOB_CHUNK_SIZE
             i += 1
 
-        cf.insert(key, {
-            'version': 1,
-            'sha1': sha1.digest(),
-            'size': len(content),
-            'chunk_size': chunk_size,
-            'chunk_count': chunks,
-        })
-
-        indices = ColumnFamily(self.pool, 'simple_indices')
-        indices.insert('blobs', {key: ''})
-        indices.insert('blob_size', {key: str(len(content))})
-
-        return sha1.digest()
-
-    def get_blob(self, key):
-        cf = ColumnFamily(self.pool, 'blobs')
-
-        row = cf.get(key, columns=['version', 'sha1', 'size', 'chunk_size',
-            'chunk_count', 'z:0001'])
-
-        if 'version' not in row:
-            raise Exception('No version column in blob.')
-
-        if row['version'] != 1:
-            raise Exception('Unknown version: %d' % row['version'])
-
-        if 'z:0001' not in row:
-            raise Exception('No data in blob.')
-
-        sha1 = hashlib.sha1()
-        sha1.update(row['z:0001'])
-
-        if len(row['z:0001']) == row['size']:
-            if sha1.digest() != row['sha1']:
-                raise Exception('SHA-1 validation failed.')
-
-            return row['z:0001']
-
-        chunks = [row['z:0001']]
-
-        for i in range(2, row['chunk_count'] + 1):
-            col = 'z:%04d' % i
-            chunk = cf.get(key, columns=[col])[col]
-            sha1.update(chunk)
-            chunks.append(chunk)
-
-        if sha1.digest() != row['sha1']:
-            raise Exception('SHA-1 validation failed.')
-
-        return b''.join(chunks)
-
-    def store_file(self, filename, content, mtime=-1, compression_state=None,
-        compressed_size=None):
-
-        cf = ColumnFamily(self.pool, 'files')
-
-        compression_state = compression_state or 'unknown'
-        assert compression_state in ('none', 'unknown', 'gzip')
-
-        sha1 = self.store_blob(filename, content)
-
-        cols = {
-            'version': 1,
-            'sha1': sha1,
-            'size': len(content),
-            'mtime': mtime,
-            'compression_state': compression_state,
-        }
-
-        if compressed_size is not None:
-            cols['compressed_size'] = compressed_size
-
-        cf.insert(filename, cols)
+        c.execute_prepared(q, dict(
+            name=filename, mtime=mtime,
+            stored_size=len(content), stored_sha1=sha1.digest(),
+            transformation=transformation,
+            original_size=original_size, original_sha1=original_sha1,
+            chunk_count=chunk_count, chunk_size=DEFAULT_BLOB_CHUNK_SIZE))
 
         indices = ColumnFamily(self.pool, 'simple_indices')
         indices.insert('files', {filename: ''})
 
-    def file_metadata(self, keys):
+        c.close()
+
+    def file_metadata(self, name):
         """Obtain metadata for a stored file.
 
         Argument is an iterable of file keys whose data to obtain.
         """
-        cf = ColumnFamily(self.pool, 'files')
+        c = self.c.cursor()
+        c.execute(b'SELECT * FROM files WHERE name=:name', {'name': name})
+        row = c.fetchone()
 
-        return cf.multiget(keys)
-
-    def file_data(self, key):
-        cf = ColumnFamily(self.pool, 'files')
-
-        try:
-            columns = cf.get(key, columns=['compression_state'])
-            raw = self.get_blob(key)
-
-            if columns['compression_state'] in ('none', 'unknown'):
-                return raw
-
-            raise Exception('We do not currently handle decompression.')
-
-        except NotFoundException:
+        if not row:
             return None
+
+        result = {}
+
+        for i, (name, cls) in enumerate(c.name_info):
+            result[name] = row[i]
+
+        return result
 
     def filenames(self):
         """Obtain the keys of all stored files."""
-        cf = ColumnFamily(self.pool, 'simple_indices')
-        return self._all_column_names_in_row(cf, 'files')
+        c = self.c.cursor()
+        c.execute(b'SELECT name FROM files')
+        for row in c:
+            yield row[0]
+
+        c.close()
 
     def truncate_build_metadata(self):
         """Truncates all derived build metadata.
@@ -371,9 +528,10 @@ class Connection(object):
         This bulk removes all build metadata and should not be performed
         unless you want to reload all derived data!
         """
-        for cf in ['slaves', 'masters', 'builders', 'builds']:
-            cf = ColumnFamily(self.pool, cf)
-            cf.truncate()
+        c = self.c.cursor()
+
+        for table in BUILDER_TABLES:
+            c.execute(b'TRUNCATE %s' % table)
 
         cf = ColumnFamily(self.pool, 'indices')
         for key in BUILD_METADATA_INDICES:
@@ -383,13 +541,11 @@ class Connection(object):
         for key in BUILD_METADATA_SIMPLE_INDICES:
             cf.remove(key)
 
-        cf = ColumnFamily(self.pool, 'counters')
-        for key in BUILD_METADATA_COUNTERS:
-            cf.remove(key)
-
         cf = ColumnFamily(self.pool, 'super_counters')
         for key in BUILD_METADATA_SUPER_COUNTERS:
             cf.remove(key)
+
+        c.close()
 
     def truncate_log_metadata(self):
         for cf in ['build_timelines']:
@@ -421,41 +577,65 @@ class Connection(object):
 
     def builders(self):
         """Obtain info about all builders."""
-        cf = ColumnFamily(self.pool, 'builders')
-        for key, cols in cf.get_range(columns=['category', 'master', 'name']):
-            yield key, cols['name'], cols['category'], cols['master']
+        c = self.c.cursor()
+        c.execute(b'SELECT id, name, category, master FROM builders')
+        for row in c:
+            yield row
 
     def builder_categories(self):
         return set(t[2] for t in self.builders())
 
     def get_builder(self, builder_id):
         """Obtain info about a builder from its ID."""
-        cf = ColumnFamily(self.pool, 'builders')
-        try:
-            return cf.get(builder_id)
-        except NotFoundException:
-            return None
+        c = self.c.cursor()
+        c.execute(b'SELECT * FROM builders WHERE id=:id', {'id': builder_id})
+        row = c.fetchone()
+        data = {}
+
+        for i, (name, cls) in enumerate(c.name_info):
+            data[name] = row[i]
+
+        c.close()
+
+        return data
 
     def builder_ids_in_category(self, category):
-        cf = ColumnFamily(self.pool, 'indices')
-        return self._all_columns_in_supercolumn_column(cf,
-            'builder_category_to_builder_ids', category)
+        c = self.c.cursor()
+        c.execute(b'SELECT id FROM builders WHERE category=:category',
+            {'category': category})
 
-    def builder_counts(self):
-        return self.get_counts('builder_number')
+        for row in c:
+            yield row[0]
+
+        c.close()
 
     def builder_durations(self):
-        return self.get_counts('builder_duration')
+        c = self.c.cursor()
+        c.execute(b'SELECT id, total_duration FROM builder_counters')
+        for row in c:
+            yield row[0], row[1]
+
+        c.close()
 
     def builder_counts_in_day(self, day):
-        cf = ColumnFamily(self.pool, 'super_counters')
-        return self._all_columns_in_supercolumn_column(cf,
-            'builder_number_by_day', day, values=True)
+        c = self.c.cursor()
+        c.execute(b'SELECT id, number FROM builder_daily_counters WHERE '
+            b'day=:day', {'day': day})
+
+        for row in c:
+            yield row
+
+        c.close()
 
     def builder_durations_in_day(self, day):
-        cf = ColumnFamily(self.pool, 'super_counters')
-        return self._all_columns_in_supercolumn_column(cf,
-            'builder_duration_by_day', day, values=True)
+        c = self.c.cursor()
+        c.execute(b'SELECT id, duration FROM builder_daily_counters WHERE '
+            b'day=:day', {'day': day})
+
+        for row in c:
+            yield row
+
+        c.close()
 
     def builder_counts_in_category(self, category):
         cf = ColumnFamily(self.pool, 'super_counters')
@@ -464,68 +644,94 @@ class Connection(object):
 
     def slaves(self):
         """Obtain basic metadata about all slaves."""
+        c = self.c.cursor()
+        c.execute(b'SELECT id, name FROM slaves')
+        for row in c:
+            yield row[0], row[1]
 
-        cf = ColumnFamily(self.pool, 'slaves')
-
-        for key, cols in cf.get_range(columns=['name']):
-            yield key, cols['name']
+        c.close()
 
     def slave_id_from_name(self, name):
-        # TODO index.
-        for slave_id, slave_name in self.slaves():
-            if slave_name == name:
-                return slave_id
+        c = self.c.cursor()
+        c.execute(b'SELECT id FROM slaves WHERE name=:name', {'name': name})
+        row = c.fetchone()
+        c.close()
 
-        return None
+        return row[0]
 
     def build_ids_on_slave(self, slave_id):
         """Obtain all build IDs that were performed on the slave."""
-        cf = ColumnFamily(self.pool, 'indices')
-        return self._all_columns_in_supercolumn_column(cf,
-            'slave_id_to_build_ids', slave_id)
+        c = self.c.cursor()
+        c.execute(b'SELECT builds FROM slaves WHERE id=:id', {'id': slave_id})
+        row = c.fetchone()
+        c.close()
+
+        return row[0]
 
     def build_ids_in_category(self, category):
         """Obtain build IDs having the specified category."""
-        cf = ColumnFamily(self.pool, 'indices')
-        return self._all_columns_in_supercolumn_column(cf,
-            'builder_category_to_build_ids', category)
+        c = self.c.cursor()
+        c.execute(b'SELECT builds FROM builders WHERE category=:category',
+            {'category': category})
+        for row in c:
+            for build in row[0]:
+                yield build
+
+        c.close()
 
     def build_ids_with_builder_name(self, builder_name):
-        cf = ColumnFamily(self.pool, 'indices')
-        return self._all_columns_in_supercolumn_column(cf,
-            'builder_name_to_build_ids', builder_name)
+        c = self.c.cursor()
+        c.execute(b'SELECT builds FROM builders WHERE name=:name',
+            {'name': builder_name})
+        for row in c:
+            for build in row[0]:
+                yield build
+
+        c.close()
 
     def build_ids_with_builder_id(self, builder_id):
-        cf = ColumnFamily(self.pool, 'indices')
-        return self._all_columns_in_supercolumn_column(cf,
-            'builder_id_to_builds_ids', builder_id)
+        c = self.c.cursor()
+        c.execute(b'SELECT builds FROM builders WHERE id=:id', {'id':
+            builder_id})
+        row = c.fetchone()
+        for build in row[0]:
+            yield build
+
+        c.close()
 
     def build_from_id(self, build_id):
         """Obtain information about a build from its ID."""
-        cf = ColumnFamily(self.pool, 'builds')
-        try:
-            return cf.get(build_id)
-        except NotFoundException:
+        c = self.c.cursor()
+        c.execute(b'SELECT * FROM builds WHERE id=:id', {'id': build_id})
+        rows = list(self._cursor_to_dicts(c))
+        c.close()
+
+        if not rows:
             return None
 
+        return rows[0]
+
     def build_durations(self, build_ids=None):
-        cf = ColumnFamily(self.pool, 'simple_indices')
-
-        if build_ids is None:
-            values = self._all_columns_in_row(cf, 'build_id_to_duration')
+        c = self.c.cursor()
+        if build_ids:
+            c.execute(b'SELECT id, duration FROM builds WHERE id IN (:ids)',
+                {'ids': build_ids})
         else:
-            values = self._column_values(cf, 'build_id_to_duration', build_ids)
+            c.execute(b'SELECT id, duration FROM builds')
 
-        for col, value in values:
-            yield col, int(value)
+        for row in c:
+            yield row
+
+        c.close()
 
     def build_durations_with_builder_name(self, builder):
-        cf = ColumnFamily(self.pool, 'indices')
+        c = self.c.cursor()
+        c.execute(b'SELECT id, duration FROM builds')
 
-        for col, value in self._all_columns_in_supercolumn_column(cf,
-            'build_duration_by_builder_name', builder, values=True):
+        for row in c:
+            yield row
 
-            yield col, int(value)
+        c.close()
 
     def build_log(self, build_id):
         """Obtain the raw log for a job from its ID."""
@@ -538,89 +744,13 @@ class Connection(object):
 
         return self.file_data(info['log_url'])
 
-    def get_counts(self, name):
-        """Obtain current counts from a counter in the counts column family."""
-        cf = ColumnFamily(self.pool, 'counters')
-        return self._all_columns_in_row(cf, name)
+    def _cursor_to_dicts(self, c):
+        names = c.name_info
 
-    def _all_columns_in_row(self, cf, key):
-        try:
-            start_column =''
-            while True:
-                result = cf.get(key, column_start=start_column,
-                    column_finish='', column_count=1000)
+        for row in c:
+            data = {}
+            for i, (name, cls) in enumerate(names):
+                data[name] = row[i]
 
-                for k, v in result.items():
-                    yield k, v
-                    start_column = k
-
-                if len(result) != 1000:
-                    break
-
-        except NotFoundException:
-            pass
-
-    def _column_values(self, cf, key, columns):
-        try:
-            fetch = []
-            for column in columns:
-                fetch.append(column)
-
-                if len(fetch) == 1000:
-                    result = cf.get(key, columns=fetch)
-
-                    for col in fetch:
-                        yield col, result.get(col, None)
-
-                    fetch = []
-
-            if len(fetch):
-                result = cf.get(key, columns=fetch)
-
-                for col in fetch:
-                    yield col, result.get(col, None)
-
-        except NotFoundException:
-            pass
-
-    def _all_column_names_in_row(self, cf, key):
-        """Generator for names of all columns in a column family."""
-        try:
-            start_column = ''
-            while True:
-                result = cf.get(key, column_start=start_column,
-                    column_finish='', column_count=1000)
-
-                for column_name in result.keys():
-                    yield column_name
-                    start_column = column_name
-
-                if len(result) != 1000:
-                    break
-
-        except NotFoundException:
-            pass
-
-    def _all_columns_in_supercolumn_column(self, cf, key, column, values=False):
-        """Generator for the names of all columns in a supercolumn column."""
-
-        try:
-            start_column =''
-            while True:
-                result = cf.get(key, column_start=start_column, column_finish='',
-                    super_column=column, column_count=1000)
-
-                for column_name, column_value in result.iteritems():
-                    if values:
-                        yield column_name, column_value
-                    else:
-                        yield column_name
-
-                    start_column = column_name
-
-                if len(result) != 1000:
-                    break
-
-        except NotFoundException:
-            pass
+            yield data
 

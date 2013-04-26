@@ -9,10 +9,12 @@ import datetime
 import fnmatch
 import json
 import gzip
+import hashlib
 import httplib
 import re
 import time
 import urllib2
+import zlib
 
 from collections import Counter
 from StringIO import StringIO
@@ -72,7 +74,6 @@ class DataLoader(object):
         """Instantiate against a Cassandra Connection Pool."""
 
         self._connection = connection
-        self._pool = connection.pool
 
     def synchronize_build_files(self):
         """Synchronize our set of raw build files with what's on the server."""
@@ -81,7 +82,9 @@ class DataLoader(object):
 
         existing = {}
         for url in server_files:
-            existing.update(self._connection.file_metadata([url]))
+            meta = self._connection.file_metadata(url)
+            if meta:
+                existing[url] = meta
 
         fetcher = ParallelHttpFetcher()
 
@@ -93,8 +96,12 @@ class DataLoader(object):
 
             # urllib3 will automagically decompress the files for us.
             data = request.data
-            self._connection.store_file(url, data, mtime=server_state[0],
-                compression_state='none', compressed_size=server_state[1])
+            compressed = zlib.compress(data)
+            sha1 = hashlib.sha1(data)
+
+            self._connection.store_file(url, compressed, mtime=server_state[0],
+                transformation='zlib', original_size=len(data),
+                original_sha1=sha1.digest())
             print('Stored %s' % url)
 
         for url in sorted(server_files, reverse=True):
@@ -106,7 +113,8 @@ class DataLoader(object):
             local_meta = existing[url]
             server_meta = server_files[url]
 
-            if local_meta['mtime'] >= server_meta[0]:
+            local_mtime = datetime.datetime.utcfromtimestamp(local_meta['mtime'])
+            if local_mtime >= server_meta[0]:
                 continue
 
             yield 'Will refresh %s because newer mtime on server' % url
@@ -117,14 +125,7 @@ class DataLoader(object):
 
     def load_build_metadata(self, url):
         """Loads build metadata from JSON in a URL."""
-        file_info = self._connection.file_metadata([url])
-
-        if url not in file_info:
-            raise Exception('Build file does not exist in local storage: %s' %
-                url)
-
-        file_info = file_info[url]
-        raw = self._connection.file_data(url)
+        raw = self._connection.get_file(url)
         if not raw:
             raise Exception('No data appears to be stored: %s' % url)
 
@@ -227,23 +228,225 @@ class DataLoader(object):
         fetcher.wait()
 
     def load_slaves(self, o):
-        cf = ColumnFamily(self._pool, 'slaves')
-        with cf.batch() as batch:
-            for slave_id, name in o.items():
-                batch.insert(slave_id, {'name': name})
+        c = self._connection.cursor()
+        q = c.prepare_query(b'INSERT INTO slaves (id, name) VALUES (:id, :name)')
+        for slave_id, name in o.items():
+            c.execute_prepared(q, dict(id=int(slave_id), name=name))
+
+        c.close()
 
         return len(o)
 
     def load_masters(self, o):
-        cf = ColumnFamily(self._pool, 'masters')
+        c = self._connection.cursor()
+        q = c.prepare_query(b'INSERT INTO masters (id, name, url) '
+            b'VALUES (:id, :name, :url)')
 
-        with cf.batch() as batch:
-            for master_id, info in o.items():
-                batch.insert(master_id, info)
+        for master_id, info in o.items():
+            c.execute_prepared(q, dict(id=int(master_id), name=info['name'],
+                url=info['url']))
+
+        c.close()
 
         return len(o)
 
+    def load_builders(self, o):
+        c = self._connection.cursor()
+        q1 = c.prepare_query(b'INSERT INTO builders (id, name, category, master) '
+            b'VALUES (:id, :name, :category, :master)')
+        q2 = c.prepare_query(b'UPDATE builders SET slaves = slaves + :slaves '
+            b'WHERE id=:id')
+        q3 = c.prepare_query(b'UPDATE masters SET builders = builders + '
+            b':builders WHERE id=:id')
+
+        for builder_id, params in o.items():
+            builder_id = int(builder_id)
+            master_id = int(params['master_id'])
+
+            c.execute_prepared(q1, dict(id=builder_id, name=params['name'],
+                category=params['category'], master=master_id))
+
+            if params['slaves']:
+                c.execute_prepared(q2, dict(id=builder_id,
+                    slaves=params['slaves']))
+
+            c.execute_prepared(q3, dict(id=master_id, builders=[builder_id]))
+
+        c.close()
+        return len(o)
+
+    BUILD_PROPERTIES = dict(
+        builder_name='buildername',
+        app_name='appName',
+        app_version='appVersion',
+        base_dir='basedir',
+        branch='branch',
+        build_dir='builddir',
+        build_filename='build_filename',
+        build_id='buildid',
+        build_uid='builduid',
+        build_url='build_url',
+        comments='comments',
+        exe_dir='exedir',
+        file_path='filepath',
+        foopy_type='foopy_type',
+        forced_clobber='forced_clobber',
+        got_revisions='got_revisions',
+        hash_type='hashType',
+        http_port='http_port',
+        hostutils_filename='hostutils_filename',
+        hostutils_url='hostutils_url',
+        js_shell_url='jsshellUrl',
+        log_url='log_url',
+        master_url='master',
+        num_ctors='num_ctors',
+        package_filename='packageFilename',
+        package_hash='packageHash',
+        package_size='packageSize',
+        package_url='packageUrl',
+        periodic_clobber='periodic_clobber',
+        pgo_build='pgo_build',
+        platform='platform',
+        product='product',
+        project='project',
+        purge_actual='purge_actual',
+        purge_target='purge_target',
+        purged_clobber='purged_clobber',
+        reason='reason',
+        revision='revision',
+        request_ids='request_ids',
+        repo_path='repo_path',
+        repository='repository',
+        robocop_filename='robocop_filename',
+        robocop_url='robocop_url',
+        scheduler='scheduler',
+        slave_build_dir='slavebuilddir',
+        slave_name='slavename',
+        sourcestamp='sourcestamp',
+        ssl_port='ssl_port',
+        stage_platform='stage_platform',
+        symbols_url='symbolsUrl',
+        tests_filename='tests_filename',
+        tests_url='testsUrl',
+        tools_dir='toolsdir',
+        who='who',
+    )
+
     def load_builds(self, o, builders):
+        c = self._connection.cursor()
+
+        q_add_to_builder = c.prepare_query(b'UPDATE builders SET '
+            b'builds = builds + :build_ids WHERE id=:id')
+
+        q_add_to_slave = c.prepare_query(b'UPDATE slaves SET '
+            b'builds = builds + :build_ids WHERE id=:id')
+
+        q_add_events_to_slave = c.prepare_query(b'UPDATE slaves SET '
+            b'build_events[:start] = :start_value, '
+            b'build_events[:end] = :end_value '
+            b'WHERE id=:id')
+
+        q_add_builder_count = c.prepare_query(b'UPDATE builder_counters '
+            b'SET total_number = total_number + 1 WHERE id=:id')
+
+        q_add_builder_duration = c.prepare_query(b'UPDATE builder_counters '
+            b'SET total_duration = total_duration + :duration WHERE id=:id')
+
+        q_add_daily_builder_count = c.prepare_query(
+            b'UPDATE builder_daily_counters SET number = number + 1 '
+            b'WHERE id=:id and day=:day')
+
+        q_add_daily_builder_duration = c.prepare_query(
+            b'UPDATE builder_daily_counters SET duration = duration + :d '
+            b'WHERE id=:id and day=:day')
+
+        q_add_category_count = c.prepare_query(
+            b'UPDATE builder_category_counters SET number = number + 1 '
+            b'WHERE category = :category')
+
+        q_add_category_duration = c.prepare_query(
+            b'UPDATE builder_category_counters SET duration = duration + :d '
+            b'WHERE category = :category')
+
+        q_add_daily_category_count = c.prepare_query(
+            b'UPDATE builder_category_daily_counters SET number = number + 1 '
+            b'WHERE category = :category AND day = :day')
+
+        q_add_daily_category_duration = c.prepare_query(
+            b'UPDATE builder_category_daily_counters '
+            b'SET duration = duration + :d '
+            b'WHERE category = :category AND day = :day')
+
+
+        epoch = datetime.date.fromtimestamp(0)
+
+        for build in o:
+            props = build['properties']
+            bid = build['id']
+            builder_id = build['builder_id']
+            slave_id = build['slave_id']
+            builder = builders[unicode(builder_id)]
+
+            start_day = datetime.date.fromtimestamp(build['starttime'])
+            start_day_ts = (start_day - epoch).total_seconds()
+            duration = build['endtime'] - build['starttime']
+
+            c.execute_prepared(q_add_to_builder,
+                dict(id=builder_id, build_ids=[bid]))
+
+            c.execute_prepared(q_add_to_slave,
+                dict(id=slave_id, build_ids=[bid]))
+
+            c.execute_prepared(q_add_events_to_slave,
+                dict(id=slave_id,
+                    start=build['starttime'], start_value='start-%d' % bid,
+                    end=build['endtime'], end_value='end-%d' % bid))
+
+            c.execute_prepared(q_add_builder_count, dict(id=builder_id))
+            c.execute_prepared(q_add_builder_duration, dict(
+                id=builder_id, duration=duration))
+
+            c.execute_prepared(q_add_daily_builder_count, dict(
+                id=builder_id, day=start_day_ts))
+
+            c.execute_prepared(q_add_daily_builder_duration, dict(
+                id=builder_id, day=start_day_ts, d=duration))
+
+            c.execute_prepared(q_add_category_count, dict(
+                category=builder['category']))
+
+            c.execute_prepared(q_add_category_duration, dict(
+                category=builder['category'], d=duration))
+
+            c.execute_prepared(q_add_daily_category_count, dict(
+                category=builder['category'], day=start_day_ts))
+
+            c.execute_prepared(q_add_daily_category_duration, dict(
+                category=builder['category'], day=start_day_ts,
+                d=duration))
+
+            p = dict(
+                id=bid,
+                builder_id=builder_id,
+                builder_name=builder['name'],
+                builder_category=builder['category'],
+                build_number=build['buildnumber'],
+                master_id=build['master_id'],
+                slave_id=slave_id,
+                request_time=build['requesttime'],
+                start_time=build['starttime'],
+                end_time=build['endtime'],
+                duration=duration,
+                result=build['result'],
+            )
+
+            v = self.BUILD_PROPERTIES.values()
+            for k in props:
+                if k not in v:
+                    print(k)
+
+        return len(o)
+
         cf = ColumnFamily(self._pool, 'builds')
         batch = cf.batch()
 
@@ -252,19 +455,6 @@ class DataLoader(object):
 
         simple_indices = ColumnFamily(self._pool, 'simple_indices')
         si_batch = simple_indices.batch()
-
-        # We defer counter inserts until then end because Python
-        # increments are cheaper than Cassandra increments (hopefully).
-        counters = {
-            'builder_number': Counter(),
-            'builder_duration': Counter(),
-            'builder_number_by_day': {},
-            'builder_duration_by_day': {},
-            'builder_number_by_category': {},
-            'builder_duration_by_category': {},
-            'builder_number_by_day_and_category': {},
-            'builder_duration_by_day_and_category': {},
-        }
 
         existing_filenames = set(self._connection.filenames())
 
@@ -275,22 +465,6 @@ class DataLoader(object):
         batch.send()
         i_batch.send()
         si_batch.send()
-
-        cf = ColumnFamily(self._pool, 'counters')
-        for builder, count in counters['builder_number'].items():
-            cf.add('builder_number', builder, count)
-
-        for builder, count in counters['builder_duration'].items():
-            cf.add('builder_duration', builder, count)
-
-        cf = ColumnFamily(self._pool, 'super_counters')
-        del counters['builder_number']
-        del counters['builder_duration']
-
-        for key, super_columns in counters.items():
-            for super_column, counts in super_columns.items():
-                for column, count in counts.items():
-                    cf.add(key, column, count, super_column)
 
         return len(o)
 
@@ -393,36 +567,6 @@ class DataLoader(object):
                 Counter())[name] += elapsed
 
         batch.insert(key, columns)
-
-    def load_builders(self, o):
-        cf = ColumnFamily(self._pool, 'builders')
-        indices = ColumnFamily(self._pool, 'indices')
-
-        batch = cf.batch()
-        i_batch = indices.batch()
-
-        for builder_id, params in o.items():
-            cat = params['category']
-            columns = {
-                'category': cat,
-                'master': unicode(params['master_id']),
-                'name': params['name'],
-            }
-
-            batch.insert(builder_id, columns)
-            i_batch.insert('builder_category_to_builder_ids',
-                {cat: {builder_id: ''}})
-            i_batch.insert('master_id_to_slave_ids', {columns['master']: {
-                builder_id: ''}})
-
-            if len(params['slaves']):
-                i_batch.insert('builder_id_to_slave_ids', {builder_id: {
-                    unicode(slave_id): '' for slave_id in params['slaves']}})
-
-        batch.send()
-        i_batch.send()
-
-        return len(o)
 
     def parse_logs(self, build_ids):
         """Parse the logs for the specified build IDs into storage."""

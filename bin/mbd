@@ -17,7 +17,7 @@ from mozbuilddata.buildbotdata import (
     DataLoader as BuildbotDataLoader,
     available_build_files,
 )
-from mozbuilddata.cassandra import Connection
+from mozbuilddata.cassandra import connect
 from mozbuilddata.logparser.jobparser import parse_build_log
 
 
@@ -264,10 +264,10 @@ class CLI(object):
 
     def file_sizes(self):
         for filename in self.connection.filenames():
-            info = self.connection.file_metadata([filename])[filename]
+            info = self.connection.file_metadata(filename)
 
-            print('%s\t%d\t%d' % (filename, info['size'],
-                info['compressed_size']))
+            print('%s\t%d\t%d' % (filename, info['original_size'],
+                info['stored_size']))
 
     def json_export(self, path):
         from mozbuilddata.exporter import JSONExporter
@@ -281,8 +281,11 @@ def main():
     parser = argparse.ArgumentParser(
         description='Do stuff with Mozilla build data.')
 
-    parser.add_argument('--host', default=['localhost'], nargs='*',
+    parser.add_argument('--host', default='localhost',
         help='Cassandra host to connect to.')
+
+    parser.add_argument('--port', default=9160, type=int,
+        help='Cassandra port to connect to.')
 
     parser.add_argument('--keyspace', default='mozbuilddata',
         help='Cassandra keyspace to use for storage.')
@@ -414,10 +417,9 @@ def main():
 
     args = parser.parse_args()
 
-    connection = Connection()
-    connection.connect(args.keyspace, servers=args.host)
+    connection = connect(args.host, args.port, args.keyspace)
 
-    global_arguments = ['host', 'keyspace', 'func']
+    global_arguments = ['host', 'port', 'keyspace', 'func']
     relevant = {k: getattr(args, k) for k in vars(args) if k not in
         global_arguments}
 
