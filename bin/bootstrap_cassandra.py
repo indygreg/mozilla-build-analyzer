@@ -11,8 +11,8 @@ import urllib2
 from StringIO import StringIO
 
 
-VERSION = '1.2.3'
-DOWNLOAD_URL = 'http://mirrors.sonic.net/apache/cassandra/1.2.3/apache-cassandra-1.2.3-bin.tar.gz'
+VERSION = '1.2.4'
+DOWNLOAD_URL = 'http://mirrors.sonic.net/apache/cassandra/1.2.4/apache-cassandra-1.2.4-bin.tar.gz'
 
 ourdir = os.path.dirname(__file__)
 topdir = os.path.normpath(os.path.join(ourdir, '..'))
