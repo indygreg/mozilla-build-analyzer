@@ -28,43 +28,6 @@ from pycassa.system_manager import (
 from pycassa import NotFoundException
 
 
-COLUMN_FAMILIES = {
-    # Derived data.
-
-    # We have a catch-all super column family for useful indices. Keys are
-    # the name of the index. Super columns are the thing being mapped from.
-    # Columns are what we are lists of things we are mapping to. Values
-    # are typically empty.
-    'indices': {
-        'comment': 'General bucket for useful indexes.',
-        'column_type': 'Super',
-        'key_validation_class': 'UTF8Type',
-        'comparator_type': UTF8_TYPE,
-        'subcomparator_type': UTF8_TYPE,
-        'default_validation_class': 'UTF8Type',
-    },
-    'simple_indices': {
-        'comment': 'Version of indices with a regular column family.',
-        'key_validation_class': 'UTF8Type',
-        'comparator_type': UTF8_TYPE,
-        'default_validation_class': 'UTF8Type',
-    },
-    'counters': {
-        'comment': 'Holds counters in a regular column family.',
-        'key_validation_class': 'UTF8Type',
-        'comparator_type': UTF8_TYPE,
-        'default_validation_class': 'CounterColumnType',
-    },
-    'super_counters': {
-        'comment': 'Holds counters in a super column family.',
-        'column_type': 'Super',
-        'key_validation_class': 'UTF8Type',
-        'comparator_type': UTF8_TYPE,
-        'subcomparator_type': UTF8_TYPE,
-        'default_validation_class': 'CounterColumnType',
-    },
-}
-
 TABLES = {
     'builders': b'''
         CREATE TABLE builders (
@@ -423,25 +386,6 @@ class Connection(object):
             manager.create_keyspace(keyspace,
                 pycassa.system_manager.SIMPLE_STRATEGY,
                 {'replication_factor': '1'})
-
-        cfs = manager.get_keyspace_column_families(keyspace)
-
-        for name, props in COLUMN_FAMILIES.items():
-            if name not in cfs:
-                manager.create_column_family(keyspace, name, **props)
-                continue
-
-            # The logic here is likely crap. Surely this problem has been
-            # solved before...
-            existing = cfs[name]
-            existing_metadata = {d.name: d for d in existing.column_metadata}
-
-            for column, column_type in COLUMN_TYPES.get(name, {}).items():
-                e = existing_metadata.get(column)
-                if e:
-                    continue
-
-                manager.alter_column(keyspace, name, column, column_type)
 
         self.pool = pycassa.pool.ConnectionPool(keyspace, server_list=servers,
             timeout=90, pool_size=15, *args, **kwargs)
