@@ -528,18 +528,6 @@ class Connection(object):
         for table in BUILDER_TABLES:
             c.execute(b'TRUNCATE %s' % table)
 
-        cf = ColumnFamily(self.pool, 'indices')
-        for key in BUILD_METADATA_INDICES:
-            cf.remove(key)
-
-        cf = ColumnFamily(self.pool, 'simple_indices')
-        for key in BUILD_METADATA_SIMPLE_INDICES:
-            cf.remove(key)
-
-        cf = ColumnFamily(self.pool, 'super_counters')
-        for key in BUILD_METADATA_SUPER_COUNTERS:
-            cf.remove(key)
-
         c.close()
 
     def truncate_log_metadata(self):
