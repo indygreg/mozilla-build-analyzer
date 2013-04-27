@@ -27,6 +27,8 @@ from pycassa.system_manager import (
 
 from pycassa import NotFoundException
 
+from .connection.builds import BuildConnection
+
 
 TABLES = {
     'builders': b'''
@@ -104,19 +106,17 @@ TABLES = {
     'builds': b'''
         CREATE TABLE builds (
             id int PRIMARY KEY,
-            builder_id int,
-            builder_name text,
-            builder_name_printed text,
+            version_ varint,
+
+            // Top-level items.
+            builder_id varint,
             builder_category text,
-            build_number int,
-            master_id int,
-            master_url text,
-            slave_id int,
-            slave_name text,
+            build_number varint,
+            master_id varint,
+            slave_id varint,
             request_time timestamp,
             start_time timestamp,
             end_time timestamp,
-            duration int,
             result int,
 
             // Properties.
@@ -130,14 +130,15 @@ TABLES = {
             build_filename text,
             build_url text,
             build_uid text,
+            builder_name text,
             comments text,
             comm_revision text,
-            compare_locaes_revision text,
+            compare_locales_revision text,
             complete_mar_filename text,
             complete_mar_hash text,
             complete_mar_size varint,
             complete_mar_url text,
-            complete_snipper_filename text,
+            complete_snippet_filename text,
             config_file text,
             config_revision text,
             en_revision text,
@@ -157,7 +158,7 @@ TABLES = {
             hash_type text,
             hostutils_filename text,
             hostutils_url text,
-            http_port int,
+            http_port varint,
             ini_path text,
             installer_hash text,
             installer_filename text,
@@ -169,7 +170,7 @@ TABLES = {
             log_url text,
             mozmill_virtualenv_setup text,
             moz_revision text,
-            num_ctors int,
+            num_ctors varint,
             nightly_build boolean,
             package_filename text,
             package_hash text,
@@ -208,7 +209,7 @@ TABLES = {
             slave_build_dir text,
             slow_tests boolean,
             sourcestamp text,
-            ssl_port int,
+            ssl_port varint,
             stage_platform text,
             sut_ip inet,
             symbols_filename text,
@@ -216,6 +217,7 @@ TABLES = {
             tests_filename text,
             tests_url text,
             tools_dir text,
+            tools_revision text,
             tree text,
             unsigned_apk_url text,
             upload_host text,
@@ -224,6 +226,10 @@ TABLES = {
             version text,
             vsize varint,
             who text,
+
+            duration varint,
+            master_url text,
+            slave_name text,
         )
         WITH comment='Describes individual build jobs.'
     ''',
@@ -369,6 +375,8 @@ class Connection(object):
                 c.execute(create)
 
         c.close()
+
+        self.builds = BuildConnection(self.c)
 
     def cursor(self):
         return self.c.cursor()

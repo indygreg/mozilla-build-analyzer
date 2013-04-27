@@ -137,8 +137,8 @@ class DataLoader(object):
         return self.load_build_metadata(url)
 
     def load_builds_json(self, obj):
-        yield 'Loaded %d slaves' % self.load_slaves(obj['slaves'])
         yield 'Loaded %d masters' % self.load_masters(obj['masters'])
+        yield 'Loaded %d slaves' % self.load_slaves(obj['slaves'])
         yield 'Loaded %d builders' % self.load_builders(obj['builders'])
         yield 'Loaded %d builds' % self.load_builds(obj['builds'],
             obj['builders'])
@@ -287,14 +287,14 @@ class DataLoader(object):
         build_url='build_url',
         builddir='build_dir',
         buildid='build_id',
-        buildnumber='build_number',
+        buildnumber=('build_number', int),
         builduid='build_uid',
         comments='comments',
         comm_revision='comm_revision',
         compare_locales_revision='compare_locales_revision',
         completeMarFilename='complete_mar_filename',
         completeMarHash='complete_mar_hash',
-        completeMarSize='complete_mar_size',
+        completeMarSize=('complete_mar_size', int),
         completeMarUrl='complete_mar_url',
         completesnippetFilename='complete_snippet_filename',
         configFile='config_file',
@@ -308,19 +308,19 @@ class DataLoader(object):
         filepath='file_path',
         fileURL='file_url',
         foopy_type='foopy_type',
-        forced_clobber='forced_clobber',
+        forced_clobber=('forced_clobber', bool),
         fx_revision='fx_revision',
         gaia_revision='gaia_revision',
         gecko_revision='gecko_revision',
         got_revision='got_revision',
         hashType='hash_type',
-        http_port='http_port',
+        http_port=('http_port', int),
         hostutils_filename='hostutils_filename',
         hostutils_url='hostutils_url',
         inipath='ini_path',
         installerHash='installer_hash',
         installerFilename='installer_filename',
-        installerSize='installer_size',
+        installerSize=('installer_size', int),
         jsshellUrl='js_shell_url',
         l10n_revision='l10n_revision',
         locale='locale',
@@ -328,19 +328,19 @@ class DataLoader(object):
         master='master_url',
         mozmillVirtualenvSetup='mozmill_virtualenv_setup',
         moz_revision='moz_revision',
-        num_ctors='num_ctors',
-        nightly_build='nightly_build',
+        num_ctors=('num_ctors', int),
+        nightly_build=('nightly_build', bool),
         packageFilename='package_filename',
         packageHash='package_hash',
-        packageSize='package_size',
+        packageSize=('package_size', int),
         packageUrl='package_url',
         partialMarFilename='partial_mar_filename',
         partialMarHash='partial_mar_hash',
-        partialMarSize='partial_mar_size',
+        partialMarSize=('partial_mar_size', int),
         partialMarUrl='partial_mar_url',
         partialsnippetFilename='partial_snippet_filename',
-        periodic_clobber='periodic_clobber',
-        pgo_build='pgo_build',
+        periodic_clobber=('periodic_clobber', bool),
+        pgo_build=('pgo_build', bool),
         platform='platform',
         previousMarFilename='previous_mar_filename',
         previous_buildid='previous_build_id',
@@ -350,7 +350,7 @@ class DataLoader(object):
         project='project',
         purge_actual='purge_actual',
         purge_target='purge_target',
-        purged_clobber='purged_clobber',
+        purged_clobber=('purged_clobber', bool),
         reason='reason',
         release_config='release_config',
         release_tag='release_tag',
@@ -366,9 +366,9 @@ class DataLoader(object):
         script_repo_revision='script_repo_revision',
         slavebuilddir='slave_build_dir',
         slavename='slave_name',
-        slowTests='slow_tests',
+        slowTests=('slow_tests', bool),
         sourcestamp='sourcestamp',
-        ssl_port='ssl_port',
+        ssl_port=('ssl_port', int),
         stage_platform='stage_platform',
         sut_ip='sut_ip',
         symbolsFile='symbols_filename',
@@ -379,65 +379,63 @@ class DataLoader(object):
         testsUrl='tests_url',
         tests_url='tests_url',
         toolsdir='tools_dir',
+        tools_revision='tools_revision',
         tree='tree',
         unsignedApkUrl='unsigned_apk_url',
         upload_host='upload_host',
         upload_sshkey='upload_ssh_key',
         upload_user='upload_user',
         version='version',
-        vsize='vsize',
+        vsize=('vsize', int),
         who='who',
     )
 
     def load_builds(self, o, builders):
         c = self._connection.cursor()
 
-        q_add_to_builder = c.prepare_query(b'UPDATE builders SET '
-            b'builds = builds + :build_ids WHERE id=:id')
+        q_derived = c.prepare_query(b'''
+            BEGIN BATCH
+            UPDATE builders SET builds = builds + :build_ids WHERE
+                id=:builder_id;
 
-        q_add_to_slave = c.prepare_query(b'UPDATE slaves SET '
-            b'builds = builds + :build_ids WHERE id=:id')
+            UPDATE slaves SET builds = builds + :build_ids WHERE id=:slave_id;
 
-        q_add_events_to_slave = c.prepare_query(b'UPDATE slaves SET '
+            APPLY BATCH
+        ''')
+
+        q_counters = c.prepare_query(b'''
+            BEGIN COUNTER BATCH
+            UPDATE builder_counters SET
+                total_number = total_number + 1,
+                total_duration = total_duration + :duration
+                WHERE id=:builder_id;
+
+            UPDATE builder_daily_counters SET
+                number = number + 1,
+                duration = duration + :duration
+                WHERE id=:builder_id AND day=:day;
+
+            UPDATE builder_category_counters SET
+                number = number + 1,
+                duration = duration + :duration
+                WHERE category=:category;
+
+            UPDATE builder_category_daily_counters SET
+                number = number + 1,
+                duration = duration + :duration
+                WHERE category=:category AND day=:day;
+
+            APPLY BATCH
+            ''')
+
+        q_update_slave_events = c.prepare_query(b'UPDATE slaves SET '
             b'build_events[:start] = :start_value, '
             b'build_events[:end] = :end_value '
-            b'WHERE id=:id')
-
-        q_add_builder_count = c.prepare_query(b'UPDATE builder_counters '
-            b'SET total_number = total_number + 1 WHERE id=:id')
-
-        q_add_builder_duration = c.prepare_query(b'UPDATE builder_counters '
-            b'SET total_duration = total_duration + :duration WHERE id=:id')
-
-        q_add_daily_builder_count = c.prepare_query(
-            b'UPDATE builder_daily_counters SET number = number + 1 '
-            b'WHERE id=:id and day=:day')
-
-        q_add_daily_builder_duration = c.prepare_query(
-            b'UPDATE builder_daily_counters SET duration = duration + :d '
-            b'WHERE id=:id and day=:day')
-
-        q_add_category_count = c.prepare_query(
-            b'UPDATE builder_category_counters SET number = number + 1 '
-            b'WHERE category = :category')
-
-        q_add_category_duration = c.prepare_query(
-            b'UPDATE builder_category_counters SET duration = duration + :d '
-            b'WHERE category = :category')
-
-        q_add_daily_category_count = c.prepare_query(
-            b'UPDATE builder_category_daily_counters SET number = number + 1 '
-            b'WHERE category = :category AND day = :day')
-
-        q_add_daily_category_duration = c.prepare_query(
-            b'UPDATE builder_category_daily_counters '
-            b'SET duration = duration + :d '
-            b'WHERE category = :category AND day = :day')
-
+            b'WHERE id=:slave_id')
 
         epoch = datetime.date.fromtimestamp(0)
 
-        for build in o:
+        for i, build in enumerate(o):
             props = build['properties']
             bid = build['id']
             builder_id = build['builder_id']
@@ -448,42 +446,28 @@ class DataLoader(object):
             start_day_ts = (start_day - epoch).total_seconds()
             duration = build['endtime'] - build['starttime']
 
-            #c.execute_prepared(q_add_to_builder,
-            #    dict(id=builder_id, build_ids=[bid]))
+            existing = self._connection.builds.get_build(bid)
+            if existing:
+                print('%d/%d Updating %d' % (i, len(o), bid))
+            if not existing:
+                print('%d/%d Adding %d' % (i, len(o), bid))
 
-            #c.execute_prepared(q_add_to_slave,
-            #    dict(id=slave_id, build_ids=[bid]))
+                prepared_params = dict(
+                    build_ids=[bid],
+                    builder_id=builder_id,
+                    slave_id=slave_id,
+                    duration=duration,
+                    day=start_day_ts,
+                    category=builder['category'],
+                    start=build['starttime'], start_value='start-%d' % bid,
+                    end=build['endtime'], end_value='end-%d' % bid
+                )
 
-            #c.execute_prepared(q_add_events_to_slave,
-            #    dict(id=slave_id,
-            #        start=build['starttime'], start_value='start-%d' % bid,
-            #        end=build['endtime'], end_value='end-%d' % bid))
-
-            #c.execute_prepared(q_add_builder_count, dict(id=builder_id))
-            #c.execute_prepared(q_add_builder_duration, dict(
-            #    id=builder_id, duration=duration))
-
-            #c.execute_prepared(q_add_daily_builder_count, dict(
-            #    id=builder_id, day=start_day_ts))
-
-            #c.execute_prepared(q_add_daily_builder_duration, dict(
-            #    id=builder_id, day=start_day_ts, d=duration))
-
-            #c.execute_prepared(q_add_category_count, dict(
-            #    category=builder['category']))
-
-            #c.execute_prepared(q_add_category_duration, dict(
-            #    category=builder['category'], d=duration))
-
-            #c.execute_prepared(q_add_daily_category_count, dict(
-            #    category=builder['category'], day=start_day_ts))
-
-            #c.execute_prepared(q_add_daily_category_duration, dict(
-            #    category=builder['category'], day=start_day_ts,
-            #    d=duration))
+                c.execute_prepared(q_derived, prepared_params)
+                c.execute_prepared(q_update_slave_events, prepared_params)
+                c.execute_prepared(q_counters, prepared_params)
 
             p = dict(
-                id=bid,
                 builder_id=builder_id,
                 builder_name=builder['name'],
                 builder_category=builder['category'],
@@ -496,6 +480,10 @@ class DataLoader(object):
                 duration=duration,
                 result=build['result'],
             )
+
+            if not p['request_time']:
+                print('Build does not have defined request time: %d' % bid)
+                p['request_time'] = 0
 
             for k in props:
                 # This is almost always 1 but it is different from the
@@ -520,7 +508,8 @@ class DataLoader(object):
                     continue
 
                 if k == 'locales':
-                    p['locales'] = props[k]
+                    # TODO
+                    #p['locales'] = props[k]
                     continue
 
                 # No clue what this is for. It looks like a bug.
@@ -532,6 +521,26 @@ class DataLoader(object):
 
                 if k not in self.BUILD_PROPERTIES:
                     print(k)
+                    continue
+
+                value = props[k]
+
+                # None is null, which is the default (empty) column value.
+                if value is None:
+                    continue
+
+                target = self.BUILD_PROPERTIES[k]
+                target_type = unicode
+
+                if isinstance(target, tuple):
+                    target, target_type = target
+
+                if type(value) != target_type:
+                    value = target_type(value)
+
+                p[target] = value
+
+            self._connection.builds.insert_build(bid, 1, p)
 
         return len(o)
 
