@@ -127,10 +127,12 @@ class DataLoader(object):
         """Loads build metadata from JSON in a URL."""
         raw = self._connection.get_file(url)
         if not raw:
-            raise Exception('No data appears to be stored: %s' % url)
+            yield 'Build JSON not available: %s' % url
+            return
 
         obj = json.loads(raw, encoding='utf-8')
-        return self.load_builds_json(obj)
+        for msg in self.load_builds_json(obj):
+            yield msg
 
     def load_builds_from_day(self, t):
         url = time.strftime(BUILD_DATA_URL, time.gmtime(t))
@@ -252,25 +254,31 @@ class DataLoader(object):
 
     def load_builders(self, o):
         c = self._connection.cursor()
-        q1 = c.prepare_query(b'INSERT INTO builders (id, name, category, master) '
-            b'VALUES (:id, :name, :category, :master)')
-        q2 = c.prepare_query(b'UPDATE builders SET slaves = slaves + :slaves '
-            b'WHERE id=:id')
-        q3 = c.prepare_query(b'UPDATE masters SET builders = builders + '
-            b':builders WHERE id=:id')
+        q = c.prepare_query(b'''
+            BEGIN BATCH
+            INSERT INTO builders (id, name, category, master)
+                VALUES (:builder_id, :name, :category, :master_id);
+            UPDATE builder_categories SET builders = builders + :builders
+                WHERE category=:category;
+            UPDATE builders SET slaves = slaves + :slaves
+                WHERE id=:builder_id;
+            UPDATE masters SET builders = builders + :builders
+                WHERE id=:master_id;
+            APPLY BATCH
+        ''')
 
         for builder_id, params in o.items():
             builder_id = int(builder_id)
             master_id = int(params['master_id'])
 
-            c.execute_prepared(q1, dict(id=builder_id, name=params['name'],
-                category=params['category'], master=master_id))
-
-            if params['slaves']:
-                c.execute_prepared(q2, dict(id=builder_id,
-                    slaves=params['slaves']))
-
-            c.execute_prepared(q3, dict(id=master_id, builders=[builder_id]))
+            c.execute_prepared(q, dict(
+                builder_id=builder_id,
+                name=params['name'],
+                category=params['category'],
+                master_id=master_id,
+                slaves=params['slaves'],
+                builders=[builder_id],
+            ))
 
         c.close()
         return len(o)
@@ -397,11 +405,18 @@ class DataLoader(object):
             BEGIN BATCH
             UPDATE builders SET builds = builds + :build_ids WHERE
                 id=:builder_id;
-
+            UPDATE builder_categories SET builds = builds + :build_ids
+                WHERE category=:category;
             UPDATE slaves SET builds = builds + :build_ids WHERE id=:slave_id;
-
             APPLY BATCH
         ''')
+
+        # This should be part of the above. However, the Cassandra server is
+        # choking on it for some reason.
+        q_update_slave_events = c.prepare_query(b'UPDATE slaves SET '
+            b'build_events[:start] = :start_value, '
+            b'build_events[:end] = :end_value '
+            b'WHERE id=:slave_id')
 
         q_counters = c.prepare_query(b'''
             BEGIN COUNTER BATCH
@@ -428,10 +443,10 @@ class DataLoader(object):
             APPLY BATCH
             ''')
 
-        q_update_slave_events = c.prepare_query(b'UPDATE slaves SET '
-            b'build_events[:start] = :start_value, '
-            b'build_events[:end] = :end_value '
-            b'WHERE id=:slave_id')
+        existing_rows = {}
+        build_ids = [build['id'] for build in o]
+        for row in self._connection.builds.get_builds(build_ids):
+            existing_rows[row['id']] = row
 
         epoch = datetime.date.fromtimestamp(0)
 
@@ -446,7 +461,8 @@ class DataLoader(object):
             start_day_ts = (start_day - epoch).total_seconds()
             duration = build['endtime'] - build['starttime']
 
-            existing = self._connection.builds.get_build(bid)
+            existing = existing_rows.get(bid, None)
+
             if existing:
                 print('%d/%d Updating %d' % (i, len(o), bid))
             if not existing:
@@ -535,33 +551,15 @@ class DataLoader(object):
                 if isinstance(target, tuple):
                     target, target_type = target
 
+                if target_type == unicode and not value:
+                    continue
+
                 if type(value) != target_type:
                     value = target_type(value)
 
                 p[target] = value
 
             self._connection.builds.insert_build(bid, 1, p)
-
-        return len(o)
-
-        cf = ColumnFamily(self._pool, 'builds')
-        batch = cf.batch()
-
-        indices = ColumnFamily(self._pool, 'indices')
-        i_batch = indices.batch()
-
-        simple_indices = ColumnFamily(self._pool, 'simple_indices')
-        si_batch = simple_indices.batch()
-
-        existing_filenames = set(self._connection.filenames())
-
-        for build in o:
-            self._load_build(batch, i_batch, si_batch, counters, build,
-                builders, existing_filenames)
-
-        batch.send()
-        i_batch.send()
-        si_batch.send()
 
         return len(o)
 
@@ -583,39 +581,6 @@ class DataLoader(object):
         s_elapsed = unicode(elapsed)
         si_batch.insert('build_id_to_duration', {key: s_elapsed})
 
-        columns = {}
-        for k, v in o.items():
-            if isinstance(v, int):
-                columns[k] = unicode(v)
-                continue
-
-            if isinstance(v, basestring):
-                columns[k] = v
-                continue
-
-            if v is None:
-                continue
-
-            # TODO handle later.
-            if k == 'request_ids':
-                continue
-
-            if k == 'properties':
-                for k2, v2 in v.items():
-                    if isinstance(v2, int):
-                        columns[k2] = unicode(v2)
-                        continue
-
-                    if isinstance(v2, basestring):
-                        columns[k2] = v2
-                        continue
-
-                    # TODO handle non-scalar fields.
-
-                continue
-
-            raise Exception('Unknown non-simple field: %s %s' % (k, v))
-
         columns['log_fetch_status'] = ''
         columns['duration'] = elapsed
 
@@ -633,13 +598,6 @@ class DataLoader(object):
             columns['builder_category'] = cat
             columns['builder_name'] = name
 
-            i_batch.insert('builder_category_to_build_ids', {cat: {key: ''}})
-            i_batch.insert('builder_name_to_build_ids', {name: {key: ''}})
-
-            i_batch.insert('build_duration_by_builder_id', {builder_id: {key:
-                s_elapsed}})
-            i_batch.insert('build_duration_by_builder_name', {name: {key:
-                s_elapsed}})
             i_batch.insert('build_duration_by_builder_category', {cat: {key:
                 s_elapsed}})
 

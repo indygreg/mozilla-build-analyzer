@@ -43,6 +43,16 @@ TABLES = {
         WITH comment='Describes individual job types.'
     ''',
 
+    'builder_categories': b'''
+        CREATE TABLE builder_categories (
+            category text PRIMARY KEY,
+            builders set<int>,
+            builds set<int>,
+            build_durations map<int, varint>,
+        )
+        WITH comment='Information about builder categories.'
+    ''',
+
     'builder_counters': b'''
         CREATE TABLE builder_counters (
             id int PRIMARY KEY,
@@ -287,28 +297,6 @@ BUILDER_TABLES = [
     b'builder_category_counters',
     b'builder_category_daily_counters',
     b'builds',
-]
-
-BUILD_METADATA_INDICES = [
-    'builder_category_to_build_ids',
-    'builder_id_to_build_ids',
-    'builder_id_to_slave_ids',
-    'builder_name_to_build_ids',
-    'build_id_to_duration',
-    'build_duration_by_builder_id',
-    'build_duration_by_builder_category',
-    'build_duration_by_builder_name',
-    'master_id_to_build_ids',
-]
-
-BUILD_METADATA_SIMPLE_INDICES = [
-    'build_id_to_duration',
-]
-
-BUILD_METADATA_SUPER_COUNTERS = [
-    'build_duration_by_builder_id',
-    'build_duration_by_builder_name',
-    'build_duration_by_builder_category',
 ]
 
 LOG_METADATA_INDICES = [

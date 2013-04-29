@@ -23,3 +23,27 @@ class BuildConnection(ConnectionBase):
             return row
 
         return None
+
+    def get_builds(self, build_ids):
+        c = self.c.cursor()
+
+        ids = []
+        for i, build_id in enumerate(build_ids):
+            ids.append(str(build_id))
+
+            if i % 1000 == 0:
+                c.execute(b'SELECT id, version_ FROM builds WHERE id IN (%s)' %
+                    b', '.join(ids))
+
+                for row in self._cursor_to_dicts(c):
+                    yield row
+
+                ids[:] = []
+
+        if ids:
+            c.execute(b'SELECT id, version_ FROM builds WHERE id IN (%s)' %
+                b', '.join(ids))
+
+            for row in self._cursor_to_dicts(c):
+                yield row
+
