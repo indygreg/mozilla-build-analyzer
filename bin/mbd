@@ -58,6 +58,9 @@ class CLI(object):
     def build_metadata_truncate(self):
         self.connection.truncate_build_metadata()
 
+    def build_data_drop(self):
+        self.connection.drop_build_tables()
+
     def builder_names(self):
         builders = self.connection.builders()
 
@@ -307,6 +310,10 @@ def main():
     build_metadata_truncate = subparsers.add_parser('build-metadata-truncate',
         help='Truncate all build metadata (WARNING DELETES LOTS OF DATA)')
     build_metadata_truncate.set_defaults(func='build_metadata_truncate')
+
+    build_data_drop = subparsers.add_parser('build-data-drop',
+        help='Drop tables holding build data.')
+    build_data_drop.set_defaults(func='build_data_drop')
 
     builder_names = subparsers.add_parser('builder-names',
         help='Print the names of all builders.')

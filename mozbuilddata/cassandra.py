@@ -292,6 +292,7 @@ BUILDER_TABLES = [
     b'masters',
     b'slaves',
     b'builders',
+    b'builder_categories',
     b'builder_counters',
     b'builder_daily_counters',
     b'builder_category_counters',
@@ -523,6 +524,15 @@ class Connection(object):
 
         for table in BUILDER_TABLES:
             c.execute(b'TRUNCATE %s' % table)
+
+        c.close()
+
+    def drop_build_tables(self):
+        c = self.c.cursor()
+
+        for table in BUILDER_TABLES:
+            print('Dropping %s' % table)
+            c.execute(b'DROP TABLE %s' % table)
 
         c.close()
 
