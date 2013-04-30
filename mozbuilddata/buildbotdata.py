@@ -606,30 +606,6 @@ class DataLoader(object):
         else:
             columns['log_fetch_status'] = 'nolog'
 
-        builder_id = columns.get('builder_id')
-        if builder_id and builder_id in builders:
-            columns['builder_category'] = cat
-            columns['builder_name'] = name
-
-            day = datetime.date.fromtimestamp(o['starttime']).isoformat()
-            counters['builder_number_by_day'].setdefault(day,
-                Counter())[name] += 1
-            counters['builder_duration_by_day'].setdefault(day,
-                Counter())[name] += elapsed
-
-            counters['builder_number_by_category'].setdefault(cat,
-                Counter())[name] += 1
-            counters['builder_duration_by_category'].setdefault(cat,
-                Counter())[name] += elapsed
-
-            day_cat = '%s.%s' % (day, cat)
-            counters['builder_number_by_day_and_category'].setdefault(day_cat,
-                Counter())[name] += 1
-            counters['builder_duration_by_day_and_category'].setdefault(day_cat,
-                Counter())[name] += elapsed
-
-        batch.insert(key, columns)
-
     def parse_logs(self, build_ids):
         """Parse the logs for the specified build IDs into storage."""
         # TODO hook up parallel processing.
