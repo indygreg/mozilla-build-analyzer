@@ -7,6 +7,7 @@
 from __future__ import unicode_literals
 
 import datetime
+import pytz
 import re
 
 from collections import (
@@ -14,6 +15,8 @@ from collections import (
     namedtuple,
 )
 
+
+TZ_MV = pytz.timezone('America/Los_Angeles')
 
 RE_HEADER_METADATA = re.compile('^(?P<key>[a-z]+): (?P<value>.*)$')
 STARTED = b'========= Started'
@@ -87,7 +90,8 @@ def parse_build_log(log):
             int(m['hour']),
             int(m['minute']),
             int(m['second']),
-            int(m['subsecond'])
+            int(m['subsecond'],
+            TZ_MV)
         )
 
     while True:
