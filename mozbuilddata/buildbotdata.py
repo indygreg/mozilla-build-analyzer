@@ -593,19 +593,6 @@ class DataLoader(object):
 
         return len(o)
 
-    def _load_build(self, batch, i_batch, si_batch, counters, o, builders,
-        existing_filenames):
-
-        columns['log_fetch_status'] = ''
-        columns['duration'] = elapsed
-
-        # Look for existing log.
-        if 'log_url' in columns:
-            if columns['log_url'] in existing_filenames:
-                columns['log_fetch_status'] = 'fetched'
-        else:
-            columns['log_fetch_status'] = 'nolog'
-
     def parse_logs(self, build_ids):
         """Parse the logs for the specified build IDs into storage."""
         # TODO hook up parallel processing.
