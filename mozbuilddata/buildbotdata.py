@@ -408,6 +408,8 @@ class DataLoader(object):
             UPDATE builder_categories SET builds = builds + :build_ids
                 WHERE category=:category;
             UPDATE slaves SET builds = builds + :build_ids WHERE id=:slave_id;
+            UPDATE masters SET builds = builds + :build_ids WHERE
+                id=:master_id;
             APPLY BATCH
         ''')
 
@@ -417,6 +419,12 @@ class DataLoader(object):
             b'build_events[:start] = :start_value, '
             b'build_events[:end] = :end_value '
             b'WHERE id=:slave_id')
+
+        q_update_builder_categories = c.prepare_query(b'''
+            UPDATE builder_categories SET
+                build_durations[:build_id] = :duration
+                WHERE category = :category;
+            ''')
 
         q_counters = c.prepare_query(b'''
             BEGIN COUNTER BATCH
@@ -469,9 +477,11 @@ class DataLoader(object):
                 print('%d/%d Adding %d' % (i, len(o), bid))
 
                 prepared_params = dict(
+                    build_id=bid,
                     build_ids=[bid],
                     builder_id=builder_id,
                     slave_id=slave_id,
+                    master_id=build['master_id'],
                     duration=duration,
                     day=start_day_ts,
                     category=builder['category'],
@@ -481,6 +491,8 @@ class DataLoader(object):
 
                 c.execute_prepared(q_derived, prepared_params)
                 c.execute_prepared(q_update_slave_events, prepared_params)
+                c.execute_prepared(q_update_builder_categories,
+                    prepared_params)
                 c.execute_prepared(q_counters, prepared_params)
 
             p = dict(
@@ -566,21 +578,6 @@ class DataLoader(object):
     def _load_build(self, batch, i_batch, si_batch, counters, o, builders,
         existing_filenames):
 
-        key = str(o['id'])
-
-        props = o.get('properties', {})
-        slave_id = unicode(o['slave_id'])
-        master_id = unicode(o['master_id'])
-        builder_id = unicode(o['builder_id'])
-
-        i_batch.insert('slave_id_to_build_ids', {slave_id: {key: ''}})
-        i_batch.insert('master_id_to_build_ids', {master_id: {key: ''}})
-        i_batch.insert('builder_id_to_build_ids', {builder_id: {key: ''}})
-
-        elapsed = o['endtime'] - o['starttime']
-        s_elapsed = unicode(elapsed)
-        si_batch.insert('build_id_to_duration', {key: s_elapsed})
-
         columns['log_fetch_status'] = ''
         columns['duration'] = elapsed
 
@@ -593,8 +590,6 @@ class DataLoader(object):
 
         builder_id = columns.get('builder_id')
         if builder_id and builder_id in builders:
-            builder = builders[builder_id]
-            name, cat  = builder['name'], builder['category']
             columns['builder_category'] = cat
             columns['builder_name'] = name
 

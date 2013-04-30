@@ -109,6 +109,7 @@ TABLES = {
             name text,
             url text,
             builders set<int>,
+            builds set<int>,
         )
         WITH comment='Describes machines coordinating slaves.'
     ''',
