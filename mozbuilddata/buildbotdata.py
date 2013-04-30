@@ -11,6 +11,7 @@ import json
 import gzip
 import hashlib
 import httplib
+import pytz
 import re
 import time
 import urllib2
@@ -40,6 +41,9 @@ RE_BUILD_LISTING_ENTRY = re.compile(r'''
     \s+
     (?P<size>[\d-]+)
     $''', re.VERBOSE)
+
+TZ_MV = pytz.timezone('America/Los_Angeles')
+
 
 def available_build_files():
     """Obtain info of available build data files on the server."""
@@ -436,7 +440,12 @@ class DataLoader(object):
             UPDATE builder_daily_counters SET
                 number = number + 1,
                 duration = duration + :duration
-                WHERE id=:builder_id AND day=:day;
+                WHERE id=:builder_id AND day=:utc_day AND is_utc=true;
+
+            UPDATE builder_daily_counters SET
+                number = number + 1,
+                duration = duration + :duration
+                WHERE id=:builder_id AND day=:mv_day AND is_utc=false;
 
             UPDATE builder_category_counters SET
                 number = number + 1,
@@ -446,7 +455,12 @@ class DataLoader(object):
             UPDATE builder_category_daily_counters SET
                 number = number + 1,
                 duration = duration + :duration
-                WHERE category=:category AND day=:day;
+                WHERE category=:category AND day=:utc_day AND is_utc=true;
+
+            UPDATE builder_category_daily_counters SET
+                number = number + 1,
+                duration = duration + :duration
+                WHERE category=:category AND day=:mv_day AND is_utc=false;
 
             APPLY BATCH
             ''')
@@ -465,6 +479,9 @@ class DataLoader(object):
             slave_id = build['slave_id']
             builder = builders[unicode(builder_id)]
 
+            utc_start = datetime.datetime.utcfromtimestamp(build['starttime'])
+            mv_start = datetime.datetime.fromtimestamp(build['starttime'],
+                TZ_MV)
             start_day = datetime.date.fromtimestamp(build['starttime'])
             start_day_ts = (start_day - epoch).total_seconds()
             duration = build['endtime'] - build['starttime']
@@ -483,7 +500,8 @@ class DataLoader(object):
                     slave_id=slave_id,
                     master_id=build['master_id'],
                     duration=duration,
-                    day=start_day_ts,
+                    utc_day=utc_start.date().isoformat(),
+                    mv_day=mv_start.date().isoformat(),
                     category=builder['category'],
                     start=build['starttime'], start_value='start-%d' % bid,
                     end=build['endtime'], end_value='end-%d' % bid
@@ -592,12 +610,6 @@ class DataLoader(object):
         if builder_id and builder_id in builders:
             columns['builder_category'] = cat
             columns['builder_name'] = name
-
-            i_batch.insert('build_duration_by_builder_category', {cat: {key:
-                s_elapsed}})
-
-            counters['builder_number'].update([name])
-            counters['builder_duration'][name] += elapsed
 
             day = datetime.date.fromtimestamp(o['starttime']).isoformat()
             counters['builder_number_by_day'].setdefault(day,

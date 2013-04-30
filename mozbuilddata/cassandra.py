@@ -65,10 +65,11 @@ TABLES = {
     'builder_daily_counters': b'''
         CREATE TABLE builder_daily_counters (
             id int,
-            day timestamp,
+            day text,
+            is_utc boolean,
             number counter,
             duration counter,
-            PRIMARY KEY (id, day),
+            PRIMARY KEY (id, day, is_utc),
         )
         WITH comment='Builder ID to per-day counters.'
     ''',
@@ -85,10 +86,11 @@ TABLES = {
     'builder_category_daily_counters': b'''
         CREATE TABLE builder_category_daily_counters (
             category text,
-            day timestamp,
+            day text,
+            is_utc boolean,
             number counter,
             duration counter,
-            PRIMARY KEY (category, day),
+            PRIMARY KEY (category, day, is_utc),
         )
         WITH comment='Builder category and day to counters.'
     ''',
