@@ -27,7 +27,10 @@ from pycassa.system_manager import (
 
 from pycassa import NotFoundException
 
-from .connection import ConnectionBase
+from .connection import (
+    ConnectionBase,
+    ConnectionPool,
+)
 from .connection.builds import BuildConnection
 
 
@@ -381,62 +384,43 @@ DEFAULT_BLOB_CHUNK_SIZE = 1048576
 
 
 def connect(host, port, keyspace, create=True, *args, **kwargs):
-    c = cql.connect(host, port, keyspace, cql_version='3.0.0', *args, **kwargs)
+    pool = ConnectionPool(host, port, keyspace, *args, **kwargs)
 
-    pool = pycassa.pool.ConnectionPool(keyspace, server_list=[host],
-        timeout=90, pool_size=15, *args, **kwargs)
-
-    return Connection(c, pool, create=create)
+    return Connection(pool, create=create)
 
 
 class Connection(ConnectionBase):
-    def __init__(self, connection, pool, create=True):
-        ConnectionBase.__init__(self, connection)
+    def __init__(self, pool, create=True):
+        ConnectionBase.__init__(self, pool)
 
-        self.pool = pool
+        with self.cursor() as c:
+            c.execute(b'SELECT * from system.schema_keyspaces WHERE keyspace_name=:ks',
+                {'ks': pool.keyspace})
+            if not c.rowcount:
+                raise Exception('Please create the %s keyspace.' %
+                    pool.keyspace)
 
-        c = self.c.cursor()
-        c.execute(b'SELECT * from system.schema_keyspaces WHERE keyspace_name=:ks',
-            {'ks':connection.keyspace})
-        if not c.rowcount:
-            raise Exception('Please create the %s keyspace.' %
-                connection.keyspace)
+            c.execute(b'SELECT columnfamily_name FROM system.schema_columnfamilies '
+                b'WHERE keyspace_name=:ks', {'ks': pool.keyspace})
+            cf_names = set()
+            for row in c:
+                cf_names.add(row[0])
 
-        c = self.c.cursor()
-        c.execute(b'SELECT columnfamily_name FROM system.schema_columnfamilies '
-            b'WHERE keyspace_name=:ks', {'ks': self.c.keyspace})
-        cf_names = set()
-        for row in c:
-            cf_names.add(row[0])
+            for table, create in TABLES.items():
+                if table not in cf_names and create:
+                    c.execute(create)
 
-        for table, create in TABLES.items():
-            if table not in cf_names and create:
-                c.execute(create)
+            c.execute(b'SELECT index_name FROM system.schema_columns '
+                b'WHERE keyspace_name=:ks', {'ks': pool.keyspace})
+            indices = set()
+            for row in c:
+                indices.add(row[0])
 
-        c.execute(b'SELECT index_name FROM system.schema_columns '
-            b'WHERE keyspace_name=:ks', {'ks': self.c.keyspace})
-        indices = set()
-        for row in c:
-            indices.add(row[0])
+            for index, create in INDICES.items():
+                if index not in indices and create:
+                    c.execute(create)
 
-        for index, create in INDICES.items():
-            if index not in indices and create:
-                c.execute(create)
-
-        c.close()
-
-        self.builds = BuildConnection(self.c)
-
-    def cursor(self):
-        return self.c.cursor()
-
-    def connect(self, keyspace, *args, **kwargs):
-        """Connect to a Cassandra cluster and ensure state is sane."""
-
-        servers = kwargs.get('servers', ['localhost'])
-
-        self.pool = pycassa.pool.ConnectionPool(keyspace, server_list=servers,
-            timeout=90, pool_size=15, *args, **kwargs)
+        self.builds = BuildConnection(self._pool)
 
     def get_file(self, name):
         info = self.file_metadata(name)
@@ -471,21 +455,20 @@ class Connection(ConnectionBase):
         return raw
 
     def get_file_content(self, key):
-        c = self.c.cursor()
+        with self.cursor() as c:
+            c.execute(b'SELECT i, chunk FROM file_chunks WHERE name = :name '
+                b'ORDER BY i ASC', {'name': key})
 
-        c.execute(b'SELECT i, chunk FROM file_chunks WHERE name = :name '
-            b'ORDER BY i ASC', {'name': key})
+            chunks = []
+            expected = 1
+            for i, chunk in c:
+                if i != expected:
+                    raise Exception('Missing file chunk: %d' % i)
 
-        chunks = []
-        expected = 1
-        for i, chunk in c:
-            if i != expected:
-                raise Exception('Missing file chunk: %d' % i)
+                expected += 1
+                chunks.append(chunk)
 
-            expected += 1
-            chunks.append(chunk)
-
-        return b''.join(chunks)
+            return b''.join(chunks)
 
     def store_file(self, filename, content, mtime=-1, transformation=None,
         original_size=None, original_sha1=None):
@@ -502,65 +485,60 @@ class Connection(ConnectionBase):
         sha1 = hashlib.sha1()
         sha1.update(content)
 
-        c = self.c.cursor()
-        q_insert_chunk = c.prepare_query(b'INSERT INTO file_chunks '
-            b'(name, i, chunk) VALUES (:name, :i, :chunk)')
+        with self.cursor() as c:
+            q_insert_chunk = c.prepare_query(b'INSERT INTO file_chunks '
+                b'(name, i, chunk) VALUES (:name, :i, :chunk)')
 
-        offset = 0
-        i = 1
-        while True:
-            b = content[offset:offset + DEFAULT_BLOB_CHUNK_SIZE]
+            offset = 0
+            i = 1
+            while True:
+                b = content[offset:offset + DEFAULT_BLOB_CHUNK_SIZE]
 
-            c.execute_prepared(q_insert_chunk, dict(
-                name=filename, i=i, chunk=b))
+                c.execute_prepared(q_insert_chunk, dict(
+                    name=filename, i=i, chunk=b))
 
-            if len(b) < DEFAULT_BLOB_CHUNK_SIZE:
-                break
+                if len(b) < DEFAULT_BLOB_CHUNK_SIZE:
+                    break
 
-            offset += DEFAULT_BLOB_CHUNK_SIZE
-            i += 1
+                offset += DEFAULT_BLOB_CHUNK_SIZE
+                i += 1
 
-        params = dict(
-            name=filename,
-            mtime=mtime,
-            stored_size=len(content),
-            stored_sha1=sha1.digest(),
-            transformation=transformation,
-            chunk_count=chunk_count,
-            chunk_size=DEFAULT_BLOB_CHUNK_SIZE
-        )
+            params = dict(
+                name=filename,
+                mtime=mtime,
+                stored_size=len(content),
+                stored_sha1=sha1.digest(),
+                transformation=transformation,
+                chunk_count=chunk_count,
+                chunk_size=DEFAULT_BLOB_CHUNK_SIZE
+            )
 
-        if original_size:
-            params['original_size'] = original_size
+            if original_size:
+                params['original_size'] = original_size
 
-        if original_sha1:
-            params['original_sha1'] = original_sha1
+            if original_sha1:
+                params['original_sha1'] = original_sha1
 
-        self._insert_dict(b'files', params)
-
-        c.close()
+            self._insert_dict(b'files', params)
 
     def file_metadata(self, name):
         """Obtain metadata for a stored file.
 
         Argument is an iterable of file keys whose data to obtain.
         """
-        c = self.c.cursor()
-        c.execute(b'SELECT * FROM files WHERE name=:name', {'name': name})
+        with self.cursor() as c:
+            c.execute(b'SELECT * FROM files WHERE name=:name', {'name': name})
+            for row in self._cursor_to_dicts(c):
+                return row
 
-        for row in self._cursor_to_dicts(c):
-            return row
-
-        return None
+            return None
 
     def filenames(self):
         """Obtain the keys of all stored files."""
-        c = self.c.cursor()
-        c.execute(b'SELECT name FROM files')
-        for row in c:
-            yield row[0]
-
-        c.close()
+        with self.cursor() as c:
+            c.execute(b'SELECT name FROM files')
+            for row in c:
+                yield row[0]
 
     def truncate_build_metadata(self):
         """Truncates all derived build metadata.
@@ -568,103 +546,82 @@ class Connection(ConnectionBase):
         This bulk removes all build metadata and should not be performed
         unless you want to reload all derived data!
         """
-        c = self.c.cursor()
-
-        for table in BUILDER_TABLES:
-            c.execute(b'TRUNCATE %s' % table)
-
-        c.close()
+        with self.cursor() as c:
+            for table in BUILDER_TABLES:
+                c.execute(b'TRUNCATE %s' % table)
 
     def drop_build_tables(self):
-        c = self.c.cursor()
-
-        for table in BUILDER_TABLES:
-            print('Dropping %s' % table)
-            c.execute(b'DROP TABLE %s' % table)
-
-        c.close()
+        with self.cursor() as c:
+            for table in BUILDER_TABLES:
+                print('Dropping %s' % table)
+                c.execute(b'DROP TABLE %s' % table)
 
     def drop_log_tables(self):
-        c = self.c.cursor()
+        with self.cursor() as c:
+            for table in LOG_TABLES:
+                print('Dropping %s' % table)
+                c.execute(b'DROP TABLE %s' % table)
 
-        for table in LOG_TABLES:
-            print('Dropping %s' % table)
-            c.execute(b'DROP TABLE %s' % table)
-
-        # TODO update builds[log_parsing_version]
-
-        c.close()
+            # TODO update builds[log_parsing_version]
 
     def truncate_log_metadata(self):
-        c = self.c.cursor()
-        for table in LOG_TABLES:
-            c.execute(b'TRUNCATE %s' % tabe)
+        with self.cursor() as c:
+            for table in LOG_TABLES:
+                c.execute(b'TRUNCATE %s' % tabe)
 
-        # TODO update builds[log_parsing_version]
-
-        c.close()
+            # TODO update builds[log_parsing_version]
 
     def builders(self):
         """Obtain info about all builders."""
-        c = self.c.cursor()
-        c.execute(b'SELECT id, name, category, master FROM builders')
-        for row in c:
-            yield row
+        with self.cursor() as c:
+            c.execute(b'SELECT id, name, category, master FROM builders')
+            for row in c:
+                yield row
 
     def builder_categories(self):
         return set(t[2] for t in self.builders())
 
     def get_builder(self, builder_id):
         """Obtain info about a builder from its ID."""
-        c = self.c.cursor()
-        c.execute(b'SELECT * FROM builders WHERE id=:id', {'id': builder_id})
-        row = c.fetchone()
-        data = {}
+        with self.cursor() as c:
+            c.execute(b'SELECT * FROM builders WHERE id=:id', {'id': builder_id})
+            row = c.fetchone()
+            data = {}
 
-        for i, (name, cls) in enumerate(c.name_info):
-            data[name] = row[i]
+            for i, (name, cls) in enumerate(c.name_info):
+                data[name] = row[i]
 
-        c.close()
-
-        return data
+            return data
 
     def builder_ids_in_category(self, category):
-        c = self.c.cursor()
-        c.execute(b'SELECT id FROM builders WHERE category=:category',
-            {'category': category})
+        with self.cursor() as c:
+            c.execute(b'SELECT id FROM builders WHERE category=:category',
+                {'category': category})
 
-        for row in c:
-            yield row[0]
-
-        c.close()
+            for row in c:
+                yield row[0]
 
     def builder_durations(self):
-        c = self.c.cursor()
-        c.execute(b'SELECT id, total_duration FROM builder_counters')
-        for row in c:
-            yield row[0], row[1]
-
-        c.close()
+        with self.cursor() as c:
+            c.execute(b'SELECT id, total_duration FROM builder_counters')
+            for row in c:
+                yield row[0], row[1]
 
     def builder_counts_in_day(self, day):
-        c = self.c.cursor()
-        c.execute(b'SELECT id, number FROM builder_daily_counters WHERE '
-            b'day=:day', {'day': day})
+        with self.cursor() as c:
+            c.execute(b'SELECT id, number FROM builder_daily_counters WHERE '
+                b'day=:day', {'day': day})
 
-        for row in c:
-            yield row
-
-        c.close()
+            for row in c:
+                yield row
 
     def builder_durations_in_day(self, day):
-        c = self.c.cursor()
-        c.execute(b'SELECT id, duration FROM builder_daily_counters WHERE '
-            b'day=:day', {'day': day})
+        with self.cursor() as c:
+            c.execute(b'SELECT id, duration FROM builder_daily_counters WHERE '
+                b'day=:day', {'day': day})
 
-        for row in c:
-            yield row
-
-        c.close()
+            for row in c:
+                yield row
 
     def builder_counts_in_category(self, category):
         cf = ColumnFamily(self.pool, 'super_counters')
@@ -699,14 +656,12 @@ class Connection(ConnectionBase):
 
     def build_ids_in_category(self, category):
         """Obtain build IDs having the specified category."""
-        c = self.c.cursor()
-        c.execute(b'SELECT builds FROM builders WHERE category=:category',
-            {'category': category})
-        for row in c:
-            for build in row[0]:
-                yield build
-
-        c.close()
+        with self.cursor() as c:
+            c.execute(b'SELECT builds FROM builders WHERE category=:category',
+                {'category': category})
+            for row in c:
+                for build in row[0]:
+                    yield build
 
     def build_ids_with_builder_name(self, builder_name):
         c = self.c.cursor()
@@ -772,14 +727,4 @@ class Connection(ConnectionBase):
             return None
 
         return self.file_data(info['log_url'])
-
-    def _cursor_to_dicts(self, c):
-        names = c.name_info
-
-        for row in c:
-            data = {}
-            for i, (name, cls) in enumerate(names):
-                data[name] = row[i]
-
-            yield data
 

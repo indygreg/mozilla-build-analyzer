@@ -4,10 +4,60 @@
 
 from __future__ import unicode_literals
 
+import time
+
+from contextlib import contextmanager
+
+import cql
+
+
+class ConnectionPool(object):
+    '''Our own connection pool because cql's isn't ready for prime time.'''
+    def __init__(self, host, port, keyspace, create=True, *args, **kwargs):
+        self._conns = {}
+
+        for i in range(0, 5):
+            c = cql.connect(host, port, keyspace, cql_version='3.0.1',
+                *args, **kwargs)
+
+            self._conns[i] = [c, False]
+
+        self.keyspace = self._conns[0][0].keyspace
+
+    @contextmanager
+    def conn(self):
+        used = None
+
+        while True:
+            for row in self._conns.values():
+                if row[1]:
+                    continue
+
+                used = row
+                break
+
+            if used:
+                break
+
+            # TODO timeout after so long.
+            time.sleep(0.5)
+
+        used[1] = True
+        yield used[0]
+        used[1] = False
+
 
 class ConnectionBase(object):
-    def __init__(self, connection):
-        self.c = connection
+    def __init__(self, pool):
+        self._pool = pool
+        self.keyspace = pool.keyspace
+
+    @contextmanager
+    def cursor(self):
+        with self._pool.conn() as conn:
+            c = conn.cursor()
+            yield c
+            c.close()
 
     def _insert_dict(self, table, d):
         keys = [str(k) for k in sorted(d)]
@@ -16,10 +66,9 @@ class ConnectionBase(object):
 
         # There is a bug in cql where booleans aren't properly encoded in
         # execute(). However, they work for execute_prepared(), so we use that.
-        c = self.c.cursor()
-        q = c.prepare_query(query)
-        c.execute_prepared(q, d)
-        c.close()
+        with self.cursor() as c:
+            q = c.prepare_query(query)
+            c.execute_prepared(q, d)
 
     def _cursor_to_dicts(self, c):
         names = c.name_info
@@ -30,3 +79,4 @@ class ConnectionBase(object):
                 data[name] = row[i]
 
             yield data
+

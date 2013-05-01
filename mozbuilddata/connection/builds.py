@@ -16,39 +16,38 @@ class BuildConnection(ConnectionBase):
         self._insert_dict(b'builds', d)
 
     def get_build(self, build_id):
-        c = self.c.cursor()
-        c.execute(b'SELECT * FROM builds WHERE id=:id', {'id': build_id})
+        with self.cursor() as c:
+            c.execute(b'SELECT * FROM builds WHERE id=:id', {'id': build_id})
 
-        for row in self._cursor_to_dicts(c):
-            return row
+            for row in self._cursor_to_dicts(c):
+                return row
 
-        return None
+            return None
 
     def get_builds(self, build_ids):
-        c = self.c.cursor()
+        with self.cursor() as c:
+            ids = []
+            for i, build_id in enumerate(build_ids):
+                ids.append(str(build_id))
 
-        ids = []
-        for i, build_id in enumerate(build_ids):
-            ids.append(str(build_id))
+                if i % 1000 == 0:
+                    c.execute(b'SELECT id, version_ FROM builds WHERE id IN (%s)' %
+                        b', '.join(ids))
 
-            if i % 1000 == 0:
+                    for row in self._cursor_to_dicts(c):
+                        yield row
+
+                    ids[:] = []
+
+            if ids:
                 c.execute(b'SELECT id, version_ FROM builds WHERE id IN (%s)' %
                     b', '.join(ids))
 
                 for row in self._cursor_to_dicts(c):
                     yield row
 
-                ids[:] = []
-
-        if ids:
-            c.execute(b'SELECT id, version_ FROM builds WHERE id IN (%s)' %
-                b', '.join(ids))
-
-            for row in self._cursor_to_dicts(c):
-                yield row
-
     def update_log_parse_version(self, build_id, version):
-        c = self.c.cursor()
-        c.execute(b'UPDATE builds SET log_parse_version=:v WHERE id=:id',
-            {'v': version, 'id': build_id})
-        c.close()
+        with self.cursor() as c:
+            c.execute(b'UPDATE builds SET log_parse_version=:v WHERE id=:id',
+                {'v': version, 'id': build_id})
+
