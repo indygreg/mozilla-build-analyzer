@@ -17,7 +17,6 @@ import time
 import urllib2
 import zlib
 
-from collections import Counter
 from StringIO import StringIO
 
 from pycassa.batch import Mutator
@@ -597,77 +596,98 @@ class DataLoader(object):
         """Parse the logs for the specified build IDs into storage."""
         # TODO hook up parallel processing.
 
-        OUR_VERSION = '1'
-        mut = Mutator(self._pool)
-        cf = ColumnFamily(self._pool, 'build_timelines')
-        i_cf = ColumnFamily(self._pool, 'indices')
-        builds_cf = ColumnFamily(self._pool, 'builds')
-        counters = ColumnFamily(self._pool, 'counters')
-        super_counters = ColumnFamily(self._pool, 'super_counters')
+        OUR_VERSION = 1
+
+        c = self._connection.cursor()
+        q_add_build_step = c.prepare_query(b'''
+            INSERT INTO build_steps (build_id, i, name, state, results, start,
+            end, duration) VALUES (:build_id, :i, :name, :state, :results,
+            :start, :end, :duration_float)''')
+
+        q_step_counters = c.prepare_query(b'''
+            BEGIN COUNTER BATCH
+            UPDATE build_step_counters SET
+                number = number + 1,
+                duration = duration + :duration
+                WHERE name = :name;
+
+            UPDATE build_step_category_counters SET
+                number = number + 1,
+                duration = duration + :duration
+                WHERE category = :category;
+
+            UPDATE build_step_daily_counters SET
+                number = number + 1,
+                duration = duration + :duration
+                WHERE name = :name AND day=:day_utc AND is_utc=true;
+
+            UPDATE build_step_daily_counters SET
+                number = number + 1,
+                duration = duration + :duration
+                WHERE name = :name AND day = :day_mv AND is_utc = false;
+
+            UPDATE build_step_daily_category_counters SET
+                number = number + 1,
+                duration = duration + :duration
+                WHERE name = :name AND category = :category AND day = :day_utc
+                    AND is_utc = true;
+
+            UPDATE build_step_daily_category_counters SET
+                number = number + 1,
+                duration = duration + :duration
+                WHERE name = :name AND category = :category AND day = :day_mv
+                    AND is_utc=false;
+
+            APPLY BATCH
+        ''')
+
+        epoch = datetime.datetime.utcfromtimestamp(0).replace(tzinfo=pytz.utc)
 
         for build_id in build_ids:
-            info = self._connection.build_from_id(build_id)
+            info = self._connection.builds.get_build(build_id)
             if not info:
                 continue
 
-            existing_version = info.get('log_parsing_version')
+            existing_version = info.get('log_parse_version')
             if existing_version and existing_version >= OUR_VERSION:
                 continue
 
-            if info['log_fetch_status'] != 'fetched':
-                continue
-
-            log = self._connection.file_data(info['log_url'])
+            log = self._connection.get_file(info['log_url'])
             if not log:
                 continue
 
             parsed = parse_build_log(log)
-            cat = info['builder_category']
 
-            cols = {}
-            indices = {}
+            for i, step in enumerate(parsed.steps):
+                mv_start = step.start
+                utc_start = step.start.astimezone(pytz.utc)
+                utc_end = step.end.astimezone(pytz.utc)
 
-            for step in parsed.steps:
-                start = calendar.timegm(step.start.utctimetuple())
-                end = calendar.timegm(step.end.utctimetuple())
+                start = (utc_start - epoch).total_seconds()
+                end = (utc_end - epoch).total_seconds()
+                duration = end - start
 
-                elapsed = end - start
-                name = step.name
+                params = dict(
+                    build_id=build_id,
+                    i=i,
+                    name=step.name,
+                    state=step.state,
+                    results=step.results,
+                    start=start,
+                    end=end,
+                    duration_float=duration,
+                    duration=int(duration),
+                    category=info['builder_category'],
+                    day_utc=utc_start.date().isoformat(),
+                    day_mv=mv_start.date().isoformat(),
+                )
 
-                cols[start] = {
-                    'name': name,
-                    'state': step.state,
-                    'results': step.results,
-                    'start': unicode(start),
-                    'end': unicode(end),
-                    'elapsed': unicode(elapsed)
-                }
+                c.execute_prepared(q_add_build_step, params)
+                c.execute_prepared(q_step_counters, params)
 
-                start_date = step.start.date().isoformat()
-
-                indices[name] = {build_id: ''}
-                counters.add('build_step_number', name)
-                counters.add('build_step_duration', name, elapsed)
-                super_counters.add('build_step_number_by_category', name,
-                    1, cat)
-                super_counters.add('build_step_duration_by_category', name,
-                    elapsed, cat)
-                super_counters.add('build_step_number_by_day', name, 1,
-                    start_date)
-                super_counters.add('build_step_duration_by_day', name,
-                    elapsed, start_date)
-
-                day_cat = '%s.%s' % (start_date, cat)
-                super_counters.add('build_step_number_by_day_and_category',
-                    name, 1, day_cat)
-                super_counters.add('build_step_duration_by_day_and_category',
-                    name, elapsed, day_cat)
-
-            mut.insert(cf, build_id, cols)
-            mut.insert(i_cf, 'build_step_name_to_build_ids', indices)
-            mut.insert(builds_cf, build_id, {'log_parsing_version': OUR_VERSION})
+            self._connection.builds.update_log_parse_version(build_id,
+                OUR_VERSION)
 
             yield 'Parsed build %s into %d steps.' % (build_id,
                 len(parsed.steps))
 
-        mut.send()

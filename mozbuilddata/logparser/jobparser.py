@@ -90,8 +90,8 @@ def parse_build_log(log):
             int(m['hour']),
             int(m['minute']),
             int(m['second']),
-            int(m['subsecond'],
-            TZ_MV)
+            int(m['subsecond']),
+            TZ_MV
         )
 
     while True:

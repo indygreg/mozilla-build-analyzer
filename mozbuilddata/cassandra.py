@@ -243,8 +243,71 @@ TABLES = {
             duration varint,
             master_url text,
             slave_name text,
+            log_parse_version varint,
         )
         WITH comment='Describes individual build jobs.'
+    ''',
+
+    'build_steps': b'''
+        CREATE TABLE build_steps (
+            build_id int,
+            i varint,
+            name text,
+            state text,
+            results text,
+            start timestamp,
+            end timestamp,
+            duration float,
+
+            PRIMARY KEY (build_id, i),
+        )
+
+        WITH comment='Metadata about individual steps within parsed build logs.'
+    ''',
+
+    'build_step_counters': b'''
+        CREATE TABLE build_step_counters (
+            name text PRIMARY KEY,
+            number counter,
+            duration counter,
+        )
+        WITH comment='Counters for build steps metadata.'
+    ''',
+
+    'build_step_category_counters': b'''
+        CREATE TABLE build_step_category_counters (
+            category text PRIMARY KEY,
+            number counter,
+            duration counter,
+        )
+        WITH comment='Counters for build steps by category.'
+    ''',
+
+    'build_step_daily_counters': b'''
+        CREATE TABLE build_step_daily_counters (
+            name text,
+            day text,
+            is_utc boolean,
+            number counter,
+            duration counter,
+
+            PRIMARY KEY (name, day, is_utc),
+        )
+        WITH comment='Per-day counters for build steps.'
+    ''',
+
+    'build_step_daily_category_counters': b'''
+        CREATE TABLE build_step_daily_category_counters (
+            name text,
+            category text,
+            day text,
+            is_utc boolean,
+            number counter,
+            duration counter,
+
+            PRIMARY KEY (name, category, day, is_utc),
+        )
+        WITH comment='Per-day and category counters for build steps.'
     ''',
 
     # Files are essentially an index into blobs. They are where we record which
@@ -301,40 +364,32 @@ BUILDER_TABLES = [
     b'builder_category_counters',
     b'builder_category_daily_counters',
     b'builds',
+    b'build_steps',
+    b'build_step_counters',
 ]
 
-LOG_METADATA_INDICES = [
-    'build_step_name_to_build_ids',
-]
-
-LOG_METADATA_COUNTERS = [
-    'build_step_number',
-    'build_step_duration',
-]
-
-LOG_METADATA_SUPER_COUNTERS = [
-    'build_step_number_by_category',
-    'build_step_duration_by_category',
-    'build_step_number_by_day',
-    'build_step_duration_by_day',
-    'build_step_number_by_day_and_category',
-    'build_step_duration_by_day_and_category',
+LOG_TABLES = [
+    b'build_steps',
+    b'build_step_counters',
+    b'build_step_category_counters',
+    b'build_step_daily_counters',
+    b'build_step_daily_category_counters',
 ]
 
 DEFAULT_BLOB_CHUNK_SIZE = 1048576
 
 
-def connect(host, port, keyspace, *args, **kwargs):
+def connect(host, port, keyspace, create=True, *args, **kwargs):
     c = cql.connect(host, port, keyspace, cql_version='3.0.0', *args, **kwargs)
 
     pool = pycassa.pool.ConnectionPool(keyspace, server_list=[host],
         timeout=90, pool_size=15, *args, **kwargs)
 
-    return Connection(c, pool)
+    return Connection(c, pool, create=create)
 
 
 class Connection(object):
-    def __init__(self, connection, pool):
+    def __init__(self, connection, pool, create=True):
         self.c = connection
         self.pool = pool
 
@@ -353,7 +408,7 @@ class Connection(object):
             cf_names.add(row[0])
 
         for table, create in TABLES.items():
-            if table not in cf_names:
+            if table not in cf_names and create:
                 c.execute(create)
 
         c.execute(b'SELECT index_name FROM system.schema_columns '
@@ -363,7 +418,7 @@ class Connection(object):
             indices.add(row[0])
 
         for index, create in INDICES.items():
-            if index not in indices:
+            if index not in indices and create:
                 c.execute(create)
 
         c.close()
@@ -377,15 +432,6 @@ class Connection(object):
         """Connect to a Cassandra cluster and ensure state is sane."""
 
         servers = kwargs.get('servers', ['localhost'])
-
-        manager = pycassa.system_manager.SystemManager(server=servers[0])
-
-        # TODO we should split schema creation into its own method with full
-        # configuration options.
-        if keyspace not in manager.list_keyspaces():
-            manager.create_keyspace(keyspace,
-                pycassa.system_manager.SIMPLE_STRATEGY,
-                {'replication_factor': '1'})
 
         self.pool = pycassa.pool.ConnectionPool(keyspace, server_list=servers,
             timeout=90, pool_size=15, *args, **kwargs)
@@ -539,33 +585,25 @@ class Connection(object):
 
         c.close()
 
+    def drop_log_tables(self):
+        c = self.c.cursor()
+
+        for table in LOG_TABLES:
+            print('Dropping %s' % table)
+            c.execute(b'DROP TABLE %s' % table)
+
+        # TODO update builds[log_parsing_version]
+
+        c.close()
+
     def truncate_log_metadata(self):
-        for cf in ['build_timelines']:
-            cf = ColumnFamily(self.pool, cf)
-            cf.truncate()
+        c = self.c.cursor()
+        for table in LOG_TABLES:
+            c.execute(b'TRUNCATE %s' % tabe)
 
-        cf = ColumnFamily(self.pool, 'indices')
-        for key in LOG_METADATA_INDICES:
-            cf.remove(key)
+        # TODO update builds[log_parsing_version]
 
-        cf = ColumnFamily(self.pool, 'counters')
-        for key in LOG_METADATA_COUNTERS:
-            cf.remove(key)
-
-        cf = ColumnFamily(self.pool, 'super_counters')
-        for key in LOG_METADATA_SUPER_COUNTERS:
-            cf.remove(key)
-
-        cf = ColumnFamily(self.pool, 'builds')
-        batch = cf.batch()
-        # Remove log parsing state from builds.
-        for key, cols in cf.get_range(columns=['log_parsing_version']):
-            if 'log_parsing_version' not in cols:
-                continue
-
-            batch.remove(key, ['log_parsing_version'])
-
-        batch.send()
+        c.close()
 
     def builders(self):
         """Obtain info about all builders."""

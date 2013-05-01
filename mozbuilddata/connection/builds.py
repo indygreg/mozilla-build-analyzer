@@ -47,3 +47,8 @@ class BuildConnection(ConnectionBase):
             for row in self._cursor_to_dicts(c):
                 yield row
 
+    def update_log_parse_version(self, build_id, version):
+        c = self.c.cursor()
+        c.execute(b'UPDATE builds SET log_parse_version=:v WHERE id=:id',
+            {'v': version, 'id': build_id})
+        c.close()

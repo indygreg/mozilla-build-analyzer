@@ -201,6 +201,9 @@ class CLI(object):
         for msg in loader.parse_logs(build_id):
             print(msg)
 
+    def log_data_drop(self):
+        self.connection.drop_log_tables()
+
     def log_data_truncate(self):
         self.connection.truncate_log_metadata()
 
@@ -313,7 +316,7 @@ def main():
 
     build_data_drop = subparsers.add_parser('build-data-drop',
         help='Drop tables holding build data.')
-    build_data_drop.set_defaults(func='build_data_drop')
+    build_data_drop.set_defaults(func='build_data_drop', no_create=True)
 
     builder_names = subparsers.add_parser('builder-names',
         help='Print the names of all builders.')
@@ -381,6 +384,10 @@ def main():
     build_logs_synchronize.add_argument('--after',
         help='Only load logs from builds after this date (YYYY-MM-DD).')
 
+    log_data_drop = subparsers.add_parser('log-data-drop',
+        help='Drop tables related to parsed log data.')
+    log_data_drop.set_defaults(func='log_data_drop', no_create=True)
+
     log_cat = subparsers.add_parser('log-cat', help='Print a raw build log.')
     log_cat.set_defaults(func='log_cat')
     log_cat.add_argument('build_id', nargs='+',
@@ -389,7 +396,7 @@ def main():
     log_load = subparsers.add_parser('log-load',
         help='Parse logs and load derived data into storage.')
     log_load.set_defaults(func='log_load')
-    log_load.add_argument('build_id', nargs='*',
+    log_load.add_argument('build_id', nargs='*', type=int,
         help='Build IDs whose logs to parse and load.')
 
     log_data_truncate = subparsers.add_parser('log-data-truncate',
@@ -424,9 +431,11 @@ def main():
 
     args = parser.parse_args()
 
-    connection = connect(args.host, args.port, args.keyspace)
+    create = False if getattr(args, 'no_create', False) else True
 
-    global_arguments = ['host', 'port', 'keyspace', 'func']
+    connection = connect(args.host, args.port, args.keyspace, create=create)
+
+    global_arguments = ['host', 'port', 'keyspace', 'func', 'no_create']
     relevant = {k: getattr(args, k) for k in vars(args) if k not in
         global_arguments}
 
