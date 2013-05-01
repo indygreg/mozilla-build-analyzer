@@ -17,11 +17,6 @@ import time
 import urllib2
 import zlib
 
-from StringIO import StringIO
-
-from pycassa.batch import Mutator
-from pycassa.columnfamily import ColumnFamily
-
 from .httputil import ParallelHttpFetcher
 from .logparser.jobparser import parse_build_log
 
@@ -181,8 +176,6 @@ class DataLoader(object):
         fetched_count = 0
         excluded_count = 0
 
-        cf = ColumnFamily(self._pool, 'builds')
-
         finished_count = [0]
         def on_result(request, build_id, url):
             finished_count[0] += 1
@@ -192,29 +185,31 @@ class DataLoader(object):
             data = request.data
             compressed_size = None
 
+            transformation = None
+
             if url.endswith('.gz'):
-                s = StringIO(data)
-                compressed_size = len(s.getvalue())
-                data = gzip.GzipFile(fileobj=s).read()
+                transformation = 'gzip'
 
             now = int(time.time())
-            self._connection.store_file(url, data, now,
-                compression_state='none', compressed_size=compressed_size)
-            cf.insert(build_id, {'log_fetch_status': 'fetched'})
+
+            self._connection.store_file(url, data, mtime=now,
+                transformation=transformation)
             print('(%d/%d) %s' % (finished_count[0], to_fetch_count, url))
 
         fetcher = ParallelHttpFetcher()
 
         for build_id in sorted(possible_build_ids):
-            info = self._connection.build_from_id(build_id)
-            if not info:
+            info = self._connection.builds.get_build(build_id)
+            if not info or 'log_url' not in info:
+                excluded_count += 1
                 continue
 
-            if info['log_fetch_status'] != '':
-                fetched_count += 1
+            url = info['log_url']
+            if not url:
+                excluded_count += 1
                 continue
 
-            if info['log_url'].startswith('https://pvtbuilds2.dmz.scl3.mozilla.com'):
+            if url.startswith('https://pvtbuilds2.dmz.scl3.mozilla.com'):
                 excluded_count += 1
                 continue
 
@@ -222,8 +217,12 @@ class DataLoader(object):
                 excluded_count += 1
                 continue
 
+            existing = self._connection.file_metadata(url)
+            if existing:
+                fetched_count += 1
+                continue
+
             to_fetch_count += 1
-            url = info['log_url']
             fetcher.add_url(url, on_result, (build_id, url))
 
         yield '%d builds have been excluded based on filtering.' % excluded_count

@@ -27,6 +27,7 @@ from pycassa.system_manager import (
 
 from pycassa import NotFoundException
 
+from .connection import ConnectionBase
 from .connection.builds import BuildConnection
 
 
@@ -388,9 +389,10 @@ def connect(host, port, keyspace, create=True, *args, **kwargs):
     return Connection(c, pool, create=create)
 
 
-class Connection(object):
+class Connection(ConnectionBase):
     def __init__(self, connection, pool, create=True):
-        self.c = connection
+        ConnectionBase.__init__(self, connection)
+
         self.pool = pool
 
         c = self.c.cursor()
@@ -504,14 +506,6 @@ class Connection(object):
         q_insert_chunk = c.prepare_query(b'INSERT INTO file_chunks '
             b'(name, i, chunk) VALUES (:name, :i, :chunk)')
 
-        q = c.prepare_query(b'INSERT INTO files (name, version, mtime, '
-            b'stored_size, stored_sha1, '
-            b'transformation, original_size, original_sha1, '
-            b'chunk_count, chunk_size) '
-            b'VALUES (:name, 1, :mtime, :stored_size, :stored_sha1, '
-            b':transformation, :original_size, :original_sha1, '
-            b':chunk_count, :chunk_size)')
-
         offset = 0
         i = 1
         while True:
@@ -526,12 +520,23 @@ class Connection(object):
             offset += DEFAULT_BLOB_CHUNK_SIZE
             i += 1
 
-        c.execute_prepared(q, dict(
-            name=filename, mtime=mtime,
-            stored_size=len(content), stored_sha1=sha1.digest(),
+        params = dict(
+            name=filename,
+            mtime=mtime,
+            stored_size=len(content),
+            stored_sha1=sha1.digest(),
             transformation=transformation,
-            original_size=original_size, original_sha1=original_sha1,
-            chunk_count=chunk_count, chunk_size=DEFAULT_BLOB_CHUNK_SIZE))
+            chunk_count=chunk_count,
+            chunk_size=DEFAULT_BLOB_CHUNK_SIZE
+        )
+
+        if original_size:
+            params['original_size'] = original_size
+
+        if original_sha1:
+            params['original_sha1'] = original_sha1
+
+        self._insert_dict(b'files', params)
 
         c.close()
 
@@ -542,17 +547,11 @@ class Connection(object):
         """
         c = self.c.cursor()
         c.execute(b'SELECT * FROM files WHERE name=:name', {'name': name})
-        row = c.fetchone()
 
-        if not row:
-            return None
+        for row in self._cursor_to_dicts(c):
+            return row
 
-        result = {}
-
-        for i, (name, cls) in enumerate(c.name_info):
-            result[name] = row[i]
-
-        return result
+        return None
 
     def filenames(self):
         """Obtain the keys of all stored files."""
