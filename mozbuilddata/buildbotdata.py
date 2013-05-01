@@ -232,57 +232,52 @@ class DataLoader(object):
         fetcher.wait()
 
     def load_slaves(self, o):
-        c = self._connection.cursor()
-        q = c.prepare_query(b'INSERT INTO slaves (id, name) VALUES (:id, :name)')
-        for slave_id, name in o.items():
-            c.execute_prepared(q, dict(id=int(slave_id), name=name))
-
-        c.close()
+        with self._connection.cursor() as c:
+            q = c.prepare_query(b'INSERT INTO slaves (id, name) VALUES (:id, :name)')
+            for slave_id, name in o.items():
+                c.execute_prepared(q, dict(id=int(slave_id), name=name))
 
         return len(o)
 
     def load_masters(self, o):
-        c = self._connection.cursor()
-        q = c.prepare_query(b'INSERT INTO masters (id, name, url) '
-            b'VALUES (:id, :name, :url)')
+        with self._connection.cursor() as c:
+            q = c.prepare_query(b'INSERT INTO masters (id, name, url) '
+                b'VALUES (:id, :name, :url)')
 
-        for master_id, info in o.items():
-            c.execute_prepared(q, dict(id=int(master_id), name=info['name'],
-                url=info['url']))
-
-        c.close()
+            for master_id, info in o.items():
+                c.execute_prepared(q, dict(id=int(master_id), name=info['name'],
+                    url=info['url']))
 
         return len(o)
 
     def load_builders(self, o):
-        c = self._connection.cursor()
-        q = c.prepare_query(b'''
-            BEGIN BATCH
-            INSERT INTO builders (id, name, category, master)
-                VALUES (:builder_id, :name, :category, :master_id);
-            UPDATE builder_categories SET builders = builders + :builders
-                WHERE category=:category;
-            UPDATE builders SET slaves = slaves + :slaves
-                WHERE id=:builder_id;
-            UPDATE masters SET builders = builders + :builders
-                WHERE id=:master_id;
-            APPLY BATCH
-        ''')
+        with self._connection.cursor() as c:
+            q = c.prepare_query(b'''
+                BEGIN BATCH
+                INSERT INTO builders (id, name, category, master)
+                    VALUES (:builder_id, :name, :category, :master_id);
+                UPDATE builder_categories SET builders = builders + :builders
+                    WHERE category=:category;
+                UPDATE builders SET slaves = slaves + :slaves
+                    WHERE id=:builder_id;
+                UPDATE masters SET builders = builders + :builders
+                    WHERE id=:master_id;
+                APPLY BATCH
+            ''')
 
-        for builder_id, params in o.items():
-            builder_id = int(builder_id)
-            master_id = int(params['master_id'])
+            for builder_id, params in o.items():
+                builder_id = int(builder_id)
+                master_id = int(params['master_id'])
 
-            c.execute_prepared(q, dict(
-                builder_id=builder_id,
-                name=params['name'],
-                category=params['category'],
-                master_id=master_id,
-                slaves=params['slaves'],
-                builders=[builder_id],
-            ))
+                c.execute_prepared(q, dict(
+                    builder_id=builder_id,
+                    name=params['name'],
+                    category=params['category'],
+                    master_id=master_id,
+                    slaves=params['slaves'],
+                    builders=[builder_id],
+                ))
 
-        c.close()
         return len(o)
 
     # Maps properties from builds into column names.
@@ -401,8 +396,10 @@ class DataLoader(object):
     )
 
     def load_builds(self, o, builders):
-        c = self._connection.cursor()
+        with self._connection.cursor() as c:
+            self._load_builds(o, builders, c)
 
+    def _load_builds(self, o, builders, c):
         q_derived = c.prepare_query(b'''
             BEGIN BATCH
             UPDATE builders SET builds = builds + :build_ids WHERE
@@ -595,9 +592,12 @@ class DataLoader(object):
         """Parse the logs for the specified build IDs into storage."""
         # TODO hook up parallel processing.
 
+        with self._connection.cursor() as c:
+            self._parse_logs(build_ids, c)
+
+    def _parse_logs(self, build_ids, c):
         OUR_VERSION = 1
 
-        c = self._connection.cursor()
         q_add_build_step = c.prepare_query(b'''
             INSERT INTO build_steps (build_id, i, name, state, results, start,
             end, duration) VALUES (:build_id, :i, :name, :state, :results,
