@@ -16,10 +16,10 @@ setup(
     license='MPL',
     packages=['mozbuilddata'],
     install_requires=[
-        'cql=1.4.0',
-        'mach=0.2',
-        'pytz>=2013b',
-        'urllib3=1.6',
+        'cql == 1.4.0',
+        'mach == 0.2',
+        'pytz >= 2013b',
+        'urllib3 == 1.6',
     ],
     scripts=['bin/mbd'],
 )
