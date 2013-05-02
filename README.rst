@@ -24,6 +24,11 @@ environment. It starts by setting up a virtualenv::
 
     $ virtualenv my_virtualenv
     $ source my_virtualenv/bin/activate
+
+    # We need to install numpy manually because of an issue with
+    # setuptools.
+    $ pip install numpy
+
     $ python setup.py develop
 
 Next, you'll need to get a Cassandra instance running. If you already have
