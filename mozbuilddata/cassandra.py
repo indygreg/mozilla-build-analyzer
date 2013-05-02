@@ -10,14 +10,6 @@ import datetime
 import hashlib
 import zlib
 
-import pycassa
-
-from StringIO import StringIO
-
-from pycassa.columnfamily import ColumnFamily
-
-from pycassa import NotFoundException
-
 from .connection import (
     ConnectionBase,
     ConnectionPool,
@@ -637,11 +629,6 @@ class Connection(ConnectionBase):
 
             for row in c:
                 yield row
-
-    def builder_counts_in_category(self, category):
-        cf = ColumnFamily(self.pool, 'super_counters')
-        return self._all_columns_in_supercolumn_column(cf,
-            'builder_number_by_category', category, values=True)
 
     def slaves(self):
         """Obtain basic metadata about all slaves."""
