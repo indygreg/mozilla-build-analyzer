@@ -16,15 +16,6 @@ from StringIO import StringIO
 
 from pycassa.columnfamily import ColumnFamily
 
-from pycassa.system_manager import (
-    BYTES_TYPE,
-    DATE_TYPE,
-    INT_TYPE,
-    KEYS_INDEX,
-    LONG_TYPE,
-    UTF8_TYPE,
-)
-
 from pycassa import NotFoundException
 
 from .connection import (
