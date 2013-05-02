@@ -354,6 +354,7 @@ TABLES = {
 
 INDICES = {
     'builder_category': b'CREATE INDEX builder_category ON builders (category)',
+    'slave_name': b'CREATE INDEX slave_name ON slaves (name)',
 }
 
 COLUMN_TYPES = {}
@@ -601,11 +602,34 @@ class Connection(ConnectionBase):
             for row in c:
                 yield row[0]
 
+    def builder_names_in_category(self, category):
+        with self.cursor() as c:
+            c.execute(b'SELECT name FROM builders WHERE category=:category',
+                {'category': category})
+
+            for row in c:
+                yield row[0]
+
+    def builder_counts(self):
+        with self.cursor() as c:
+            c.execute(b'SELECT id, total_number FROM builder_counters')
+            for row in c:
+                yield row[0], row[1]
+
     def builder_durations(self):
         with self.cursor() as c:
             c.execute(b'SELECT id, total_duration FROM builder_counters')
             for row in c:
                 yield row[0], row[1]
+
+    def builder_name_map(self):
+        with self.cursor() as c:
+            c.execute(b'SELECT id, name FROM builders')
+            d = {}
+            for row in c:
+                d[row[0]] = row[1]
+
+            return d
 
     def builder_counts_in_day(self, day):
         with self.cursor() as c:
@@ -630,29 +654,23 @@ class Connection(ConnectionBase):
 
     def slaves(self):
         """Obtain basic metadata about all slaves."""
-        c = self.c.cursor()
-        c.execute(b'SELECT id, name FROM slaves')
-        for row in c:
-            yield row[0], row[1]
+        with self.cursor() as c:
+            c.execute(b'SELECT id, name FROM slaves')
+            for row in c:
+                yield row[0], row[1]
 
-        c.close()
-
-    def slave_id_from_name(self, name):
-        c = self.c.cursor()
-        c.execute(b'SELECT id FROM slaves WHERE name=:name', {'name': name})
-        row = c.fetchone()
-        c.close()
-
-        return row[0]
-
-    def build_ids_on_slave(self, slave_id):
+    def build_ids_on_slave(self, name):
         """Obtain all build IDs that were performed on the slave."""
-        c = self.c.cursor()
-        c.execute(b'SELECT builds FROM slaves WHERE id=:id', {'id': slave_id})
-        row = c.fetchone()
-        c.close()
+        with self.cursor() as c:
+            c.execute(b'SELECT builds FROM slaves WHERE name=:name LIMIT 1',
+                {'name': name})
 
-        return row[0]
+            row = c.fetchone()
+
+            if not row:
+                return []
+
+            return row[0] or []
 
     def build_ids_in_category(self, category):
         """Obtain build IDs having the specified category."""
@@ -660,6 +678,9 @@ class Connection(ConnectionBase):
             c.execute(b'SELECT builds FROM builders WHERE category=:category',
                 {'category': category})
             for row in c:
+                if not row[0]:
+                    continue
+
                 for build in row[0]:
                     yield build
 
@@ -709,13 +730,11 @@ class Connection(ConnectionBase):
         c.close()
 
     def build_durations_with_builder_name(self, builder):
-        c = self.c.cursor()
-        c.execute(b'SELECT id, duration FROM builds')
+        with self.cursor() as c:
+            c.execute(b'SELECT id, duration FROM builds')
 
-        for row in c:
-            yield row
-
-        c.close()
+            for row in c:
+                yield row
 
     def build_log(self, build_id):
         """Obtain the raw log for a job from its ID."""
