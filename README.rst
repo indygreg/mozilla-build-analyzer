@@ -99,7 +99,7 @@ Build metadata is canonically defined by a bunch of JSON files sitting
 on a public HTTP server. The first step to loading build metadata is to
 synchronize these files with a local copy::
 
-    $ mbd build-files-synchronize
+    $ mbd download-build-activity
 
 This will take a while to run initially because there are cumulatively many
 gigabytes of data. If you don't feel like waiting around for all of them to
@@ -110,7 +110,7 @@ useful parts and load them into our local store.
 
 Here is how we load the last week of data::
 
-    $ mbd build-metadata-load --day-count 7
+    $ mbd load-builds --day-count 7
 
 At this point, you can conduct analysis of build metadata!
 
@@ -122,32 +122,40 @@ Build Logs
 
 Build metadata can be supplemented with data parsed from the logs of
 individual jobs. Loading log data follows the same mechanism as build
-metadata.
+metadata. First we download the raw files then we parse the logs and
+load the result.
 
-Because logs are quite large (tens of gigabytes) and since you are likely
-only interested in a subset of logs, it's usually a good idea to import
-only what you need. Here are some ideas for intelligently importing logs::
+Because logs are quite large (around 100GB/week compressed as of May 2013)
+and since you are likely only interested in a subset of logs, it's usually a
+good idea to import only what you need. Here are some ideas for intelligently
+importing logs::
 
     # Only import logs for mozilla-central.
-    $ mbd build-logs-synchronize --category mozilla-central
+    $ mbd download-build-logs --category mozilla-central
 
     # Only import xpcshell logs for PGO builds.
-    $ mbd build-logs-synchronize --builder-pattern '*pgo*xpchsell*'
+    $ mbd download-build-logs --builder-pattern '*pgo*xpchsell*'
 
     # Windows 7 reftests.
-    $ mbd build-logs-synchronize --builder-pattern mozilla-central_win7_test_pgo-reftest
+    $ mbd download-build-logs --builder-pattern mozilla-central_win7_test_pgo-reftest
 
     # Only import logs for mozilla-central after 2013-03-28.
-    $ mbd build-logs-synchronize --after 2013-03-28 --category mozilla-central
+    $ mbd download-build-logs --after 2013-03-28 --category mozilla-central
 
-Importing logs takes a long time. And, it consumes a *lot* of bandwidth.
+Downloading logs takes a long time. And, it consumes a *lot* of bandwidth.
 But, the good news is you only need to do this once (at least once per
 build) because logs are idempotent.
+
+Once logs are downloaded, you'll need to parse them. This is accomplished with
+the **load-logs** command. This command takes build IDs as arguments. You
+can fetch those from another command pipe them in:
+
+    $ mbd builds-in-category mozilla-central | xargs mbd load-logs
 
 Analyzing Data
 ==============
 
-Run mbd with --help for a list of all the commands. Here are some::
+Run **mbd help** for a list of all the commands. Here are some::
 
     # Print the names of all slaves.
     $ mbd slave-names
@@ -159,7 +167,7 @@ Run mbd with --help for a list of all the commands. Here are some::
     $ mbd slave-efficiencies
 
     # Print all the builders associated with a builder category.
-    $ mbd builders-in-category --print-name mozilla-central
+    $ mbd builders-in-category mozilla-central
 
     # Print names of all known builders.
     $ mbd builder-names
@@ -183,7 +191,7 @@ Disclaimer
 
 The current state of this project is very alpha. Schemas will likely change.
 There are no guarantees that time spent importing data will not be lost. But
-if you have a faster internet connection and don't mind the inconvenience, go
+if you have a fast internet connection and don't mind the inconvenience, go
 right ahead.
 
 Planned Features
@@ -220,6 +228,12 @@ before it hit 1.0. He was not only interested in seeing what all has
 changed, but he was also looking for something familiar he could easily
 implement. Even if the author didn't have experience with Cassandra, he
 would still consider Cassandra because of its operational characteristics.
+
+That being said, Cassandra is not the right architecture for ad-hoc queries.
+If you want low-latency ad-hoc queries, this may not be the project for you.
+However, if you are looking for something that will scale to hold hundreds of
+gigabytes in a distributed and fault tolerant manner with very well-defined
+queries, you might have come to the right place.
 
 Is this an official Mozilla project?
 ------------------------------------
