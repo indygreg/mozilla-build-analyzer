@@ -504,6 +504,11 @@ class DataLoader(object):
                 duration = duration + :duration
                 WHERE category=:category;
 
+            UPDATE builder_category_monthly_counters SET
+                number = number + 1,
+                duration = duration + :duration
+                WHERE category=:category AND month=:utc_month;
+
             UPDATE builder_category_daily_counters SET
                 number = number + 1,
                 duration = duration + :duration
@@ -513,6 +518,11 @@ class DataLoader(object):
                 number = number + 1,
                 duration = duration + :duration
                 WHERE category=:category AND day=:mv_day AND is_utc=false;
+
+            UPDATE build_monthly_counters SET
+                number = number + 1,
+                duration = duration + :duration
+                WHERE month=:utc_month;
 
             APPLY BATCH
             ''')
@@ -554,6 +564,7 @@ class DataLoader(object):
                     slave_id=slave_id,
                     master_id=build['master_id'],
                     duration=duration,
+                    utc_month=utc_start.date().strftime('%Y-%m'),
                     utc_day=utc_start.date().isoformat(),
                     mv_day=mv_start.date().isoformat(),
                     category=builder['category'],

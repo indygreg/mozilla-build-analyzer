@@ -70,6 +70,17 @@ TABLES = {
         WITH comment='Builder category to counters.'
     ''',
 
+    'builder_category_monthly_counters': b'''
+        CREATE TABLE builder_category_monthly_counters (
+            category text,
+            month text,
+            number counter,
+            duration counter,
+            PRIMARY KEY (category, month),
+        )
+        WITH comment='Builder counters aggregated by UTC month.'
+    ''',
+
     'builder_category_daily_counters': b'''
         CREATE TABLE builder_category_daily_counters (
             category text,
@@ -235,6 +246,15 @@ TABLES = {
         WITH comment='Describes individual build jobs.'
     ''',
 
+    'build_monthly_counters': b'''
+        CREATE TABLE build_monthly_counters (
+            month text PRIMARY KEY,
+            number counter,
+            duration counter,
+        )
+        WITH comment='Build counters aggregated by month.'
+    ''',
+
     'build_steps': b'''
         CREATE TABLE build_steps (
             build_id int,
@@ -350,8 +370,10 @@ BUILDER_TABLES = [
     b'builder_counters',
     b'builder_daily_counters',
     b'builder_category_counters',
+    b'builder_category_monthly_counters',
     b'builder_category_daily_counters',
     b'builds',
+    b'build_monthly_counters',
     b'build_steps',
     b'build_step_counters',
 ]
