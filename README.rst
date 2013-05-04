@@ -22,14 +22,20 @@ Initial Setup
 Once you've cloned the repository, you'll need to set up your run-time
 environment. It starts by setting up a virtualenv::
 
+    # Create new virtualenv at path "my_virtualenv".
     $ virtualenv my_virtualenv
+
+    # Enter the virtualenv.
     $ source my_virtualenv/bin/activate
 
-    # We need to install numpy manually because of an issue with
-    # setuptools.
-    $ pip install numpy
+    # Install required packages.
+    $ pip install -r requirements.txt
 
+    # Install ourself.
     $ python setup.py develop
+
+    # When you are done with the virtualenv, run this.
+    $ deactivate
 
 Next, you'll need to get a Cassandra instance running. If you already have
 one running, great. You can connect to that. If not, run the following to

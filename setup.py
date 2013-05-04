@@ -15,12 +15,8 @@ setup(
     description='Fetch, store, and analyze information about Mozilla builds.',
     license='MPL',
     packages=['mozbuilddata'],
-    install_requires=[
-        'cql == 1.4.0',
-        'mach == 0.2',
-        'pytz >= 2013b',
-        'urllib3 == 1.6',
-    ],
+    # Actual installation should be performed with pip.
+    install_requires=['cql', 'mach', 'pytz', 'urllib3'],
     scripts=['bin/mbd'],
 )
 
