@@ -4,7 +4,8 @@
 
 from __future__ import unicode_literals
 
-import time
+import collections
+import threading
 
 from contextlib import contextmanager
 
@@ -13,38 +14,23 @@ import cql
 
 class ConnectionPool(object):
     '''Our own connection pool because cql's isn't ready for prime time.'''
-    def __init__(self, host, port, keyspace, create=True, *args, **kwargs):
-        self._conns = {}
+    def __init__(self, host, port, keyspace, create=True, size=5,
+        *args, **kwargs):
+        self._conns = collections.deque()
+        self._sem = threading.Semaphore(size)
 
-        for i in range(0, 5):
-            c = cql.connect(host, port, keyspace, cql_version='3.0.1',
-                *args, **kwargs)
+        for i in range(0, size):
+            self._conns.append(cql.connect(host, port, keyspace,
+                cql_version='3.0.1', *args, **kwargs))
 
-            self._conns[i] = [c, False]
-
-        self.keyspace = self._conns[0][0].keyspace
+        self.keyspace = self._conns[0].keyspace
 
     @contextmanager
     def conn(self):
-        used = None
-
-        while True:
-            for row in self._conns.values():
-                if row[1]:
-                    continue
-
-                used = row
-                break
-
-            if used:
-                break
-
-            # TODO timeout after so long.
-            time.sleep(0.5)
-
-        used[1] = True
-        yield used[0]
-        used[1] = False
+        with self._sem:
+            conn = self._conns.popleft()
+            yield conn
+            self._conns.append(conn)
 
 
 class ConnectionBase(object):
