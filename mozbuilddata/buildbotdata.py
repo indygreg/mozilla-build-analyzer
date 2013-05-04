@@ -17,6 +17,8 @@ import time
 import urllib2
 import zlib
 
+from threading import Thread
+
 from .httputil import ParallelHttpFetcher
 from .logparser.jobparser import parse_build_log
 
@@ -37,6 +39,24 @@ RE_BUILD_LISTING_ENTRY = re.compile(r'''
     $''', re.VERBOSE)
 
 TZ_MV = pytz.timezone('America/Los_Angeles')
+
+
+def make_chunks(data, n):
+    chunk_size = len(data) / n + 1
+    chunks = []
+    current = []
+
+    for i, e in enumerate(data):
+        current.append(e)
+
+        if i and i % chunk_size == 0:
+            chunks.append(current)
+            current = []
+
+    if current:
+        chunks.append(current)
+
+    return chunks
 
 
 def available_build_files():
@@ -250,7 +270,25 @@ class DataLoader(object):
 
         return len(o)
 
-    def load_builders(self, o):
+    def load_builders(self, o, workers=4):
+        chunks = make_chunks(o.items(), workers)
+
+        threads = []
+        for chunk in chunks:
+            t = Thread(target=DataLoader._load_builders_worker,
+                args=(self, dict(chunk)))
+            t.start()
+            threads.append(t)
+
+        # TODO handle KeyboardInterrupt
+        for t in threads:
+            t.join()
+
+        return len(o)
+
+    @staticmethod
+    def _load_builders_worker(self, o):
+        # TODO this can deadlock if # workers > # connections.
         with self._connection.cursor() as c:
             q = c.prepare_query(b'''
                 BEGIN BATCH
@@ -395,11 +433,30 @@ class DataLoader(object):
         who='who',
     )
 
-    def load_builds(self, o, builders):
-        with self._connection.cursor() as c:
-            self._load_builds(o, builders, c)
+    def load_builds(self, o, builders, workers=4):
+        chunks = make_chunks(o, workers)
 
-    def _load_builds(self, o, builders, c):
+        state = [0, len(o)]
+        threads = []
+        for chunk in chunks:
+            t = Thread(target=DataLoader._build_loader_worker,
+                args=(self, chunk, builders, state))
+            t.start()
+            threads.append(t)
+
+        # TODO handle keyboardinterrupt
+        for t in threads:
+            t.join()
+
+        return len(o)
+
+    @staticmethod
+    def _build_loader_worker(self, o, builders, state):
+        # TODO this can deadlock if # workers > # connections.
+        with self._connection.cursor() as c:
+            self._load_builds(o, builders, c, state)
+
+    def _load_builds(self, o, builders, c, state):
         q_derived = c.prepare_query(b'''
             BEGIN BATCH
             UPDATE builders SET builds = builds + :build_ids WHERE
@@ -467,7 +524,9 @@ class DataLoader(object):
 
         epoch = datetime.date.fromtimestamp(0)
 
-        for i, build in enumerate(o):
+        for build in o:
+            state[0] += 1
+
             props = build['properties']
             bid = build['id']
             builder_id = build['builder_id']
@@ -484,9 +543,9 @@ class DataLoader(object):
             existing = existing_rows.get(bid, None)
 
             if existing:
-                print('%d/%d Updating %d' % (i, len(o), bid))
+                print('%d/%d Updating %d' % (state[0], state[1], bid))
             if not existing:
-                print('%d/%d Adding %d' % (i, len(o), bid))
+                print('%d/%d Adding %d' % (state[0], state[1], bid))
 
                 prepared_params = dict(
                     build_id=bid,
