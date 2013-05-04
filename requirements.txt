@@ -8,4 +8,4 @@ thrift == 0.9.0
 urllib3 == 1.6
 
 # Install a custom version of cql with patches not yet released.
-git+git://github.com/indygreg/cassandra-dbapi2.git@52c1ce49d04845ff5b9fd41f711f4c4a07a9cd4b#egg=cql
+git+git://github.com/indygreg/cassandra-dbapi2.git@4fab952c403538f87d400c051ecf1e8467612888#egg=cql
