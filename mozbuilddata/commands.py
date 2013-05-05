@@ -53,34 +53,24 @@ class Commands(object):
 
     @Command('load-builds', category='loading',
         description='Load build metadata from JSON files.')
-    @CommandArgument('--day', nargs='*', dest='days',
-        help='Day to load. Specified as a YYYY-MM-DD value.')
-    @CommandArgument('--day-count', type=int,
-        help='Number of previous days of data to import')
-    def load_builds(self, days=None, day_count=None):
-        times = []
-
-        if day_count and days:
-            raise Exception('Can only specify 1 of day count or days.')
-
-        if day_count:
-            now = time.time()
-            # We don't do today because we likely don't have data yet.
-            for i in range(1, day_count + 1):
-                times.append(now - i * 86400)
-        elif days:
-            for day in days:
-                t = time.strptime(day, '%Y-%m-%d')
-                times.append(calendar.timegm(t))
-
-        if not times:
-            times.append(time.time())
+    @CommandArgument('after',
+        help='Load data from before this YYYY-MM-DD date.')
+    @CommandArgument('before',
+        help='Load data from after this YYYY-MM-DD date.')
+    def load_builds(self, before=None, after=None):
+        before = datetime.datetime.strptime(before, '%Y-%m-%d')
+        after = datetime.datetime.strptime(after, '%Y-%m-%d')
+        day = datetime.timedelta(1)
 
         loader = BuildbotDataLoader(self.c)
-        for t in times:
-            print(time.strftime('Loading data for %Y-%m-%d', time.gmtime(t)))
-            for msg in loader.load_builds_from_day(t):
+
+        current = before - day
+        while current >= after:
+            print('Loading data for %s' % current.date().isoformat())
+            for msg in loader.load_builds_from_day(current):
                 print(msg)
+
+            current -= day
 
     @Command('load-logs', category='loading',
         description='Parse logs and load derived data into storage.')

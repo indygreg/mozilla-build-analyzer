@@ -152,8 +152,8 @@ class DataLoader(object):
         for msg in self.load_builds_json(obj):
             yield msg
 
-    def load_builds_from_day(self, t):
-        url = time.strftime(BUILD_DATA_URL, time.gmtime(t))
+    def load_builds_from_day(self, day):
+        url = day.strftime(BUILD_DATA_URL)
         return self.load_build_metadata(url)
 
     def load_builds_json(self, obj):
