@@ -64,13 +64,13 @@ class Commands(object):
 
         loader = BuildbotDataLoader(self.c)
 
-        current = before - day
-        while current >= after:
+        current = after
+        while current < before:
             print('Loading data for %s' % current.date().isoformat())
             for msg in loader.load_builds_from_day(current):
                 print(msg)
 
-            current -= day
+            current += day
 
     @Command('load-logs', category='loading',
         description='Parse logs and load derived data into storage.')
