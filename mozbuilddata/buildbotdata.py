@@ -543,12 +543,22 @@ class DataLoader(object):
             slave_id = build['slave_id']
             builder = builders[unicode(builder_id)]
 
+            # Some old builds have an invalid endtime of 1. Unfortunately, we
+            # don't know what the actual elapsed time is. So, we just mark it
+            # down as 1 second.
+            if build['endtime'] == 1:
+                print('Invalid end time for %d: %d' % (bid, build['endtime']))
+                build['endtime'] = build['starttime'] + 1
+
             utc_start = datetime.datetime.utcfromtimestamp(build['starttime'])
             mv_start = datetime.datetime.fromtimestamp(build['starttime'],
                 TZ_MV)
             start_day = datetime.date.fromtimestamp(build['starttime'])
             start_day_ts = (start_day - epoch).total_seconds()
             duration = build['endtime'] - build['starttime']
+            if duration < 0:
+                print('Ignoring because duration is less than 0: %d' % bid)
+                continue
 
             existing = existing_rows.get(bid, None)
 
