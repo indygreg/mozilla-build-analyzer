@@ -364,6 +364,7 @@ TABLES = {
 
 INDICES = {
     'builder_category': b'CREATE INDEX builder_category ON builders (category)',
+    'builder_name': b'CREATE INDEX builder_name ON builders (name)',
     'slave_name': b'CREATE INDEX slave_name ON slaves (name)',
 }
 
@@ -707,24 +708,20 @@ class Connection(ConnectionBase):
                     yield build
 
     def build_ids_with_builder_name(self, builder_name):
-        c = self.c.cursor()
-        c.execute(b'SELECT builds FROM builders WHERE name=:name',
-            {'name': builder_name})
-        for row in c:
-            for build in row[0]:
-                yield build
-
-        c.close()
+        with self.cursor() as c:
+            c.execute(b'SELECT builds FROM builders WHERE name=:name',
+                {'name': builder_name})
+            for row in c:
+                for build in row[0]:
+                    yield build
 
     def build_ids_with_builder_id(self, builder_id):
-        c = self.c.cursor()
-        c.execute(b'SELECT builds FROM builders WHERE id=:id', {'id':
-            builder_id})
-        row = c.fetchone()
-        for build in row[0]:
-            yield build
-
-        c.close()
+        with self.cursor() as c:
+            c.execute(b'SELECT builds FROM builders WHERE id=:id', {'id':
+                builder_id})
+            row = c.fetchone()
+            for build in row[0]:
+                yield build
 
     def build_from_id(self, build_id):
         """Obtain information about a build from its ID."""
