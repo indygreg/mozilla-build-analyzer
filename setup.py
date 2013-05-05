@@ -16,7 +16,13 @@ setup(
     license='MPL',
     packages=['mozbuilddata'],
     # Actual installation should be performed with pip.
-    install_requires=['cql', 'mach', 'pytz', 'urllib3'],
+    install_requires=[
+        'cql',
+        'mach',
+        'progress',
+        'pytz',
+        'urllib3',
+    ],
     scripts=['bin/mbd'],
 )
 

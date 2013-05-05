@@ -19,6 +19,8 @@ import zlib
 
 from threading import Thread
 
+from progress.bar import Bar
+
 from .httputil import ParallelHttpFetcher
 from .logparser.jobparser import parse_build_log
 
@@ -436,7 +438,15 @@ class DataLoader(object):
     def load_builds(self, o, builders, workers=4):
         chunks = make_chunks(o, workers)
 
-        state = [0, len(o)]
+        state = dict(
+            bar=Bar('Builds', max=len(o)),
+            adds=0,
+            updates=0,
+            invalid_duration=[],
+            invalid_endtime=[],
+            missing_requesttime=[],
+        )
+
         threads = []
         for chunk in chunks:
             t = Thread(target=DataLoader._build_loader_worker,
@@ -447,6 +457,12 @@ class DataLoader(object):
         # TODO handle keyboardinterrupt
         for t in threads:
             t.join()
+
+        state['bar'].finish()
+        print('%d added; %d updated' % (state['adds'], state['updates']))
+        if state['invalid_duration']:
+            print('%d have invalid durations' %
+                len(state['invalid_duration']))
 
         return len(o)
 
@@ -535,7 +551,7 @@ class DataLoader(object):
         epoch = datetime.date.fromtimestamp(0)
 
         for build in o:
-            state[0] += 1
+            state['bar'].next()
 
             props = build['properties']
             bid = build['id']
@@ -547,7 +563,7 @@ class DataLoader(object):
             # don't know what the actual elapsed time is. So, we just mark it
             # down as 1 second.
             if build['endtime'] == 1:
-                print('Invalid end time for %d: %d' % (bid, build['endtime']))
+                state['invalid_endtime'].append((bid, build['endtime']))
                 build['endtime'] = build['starttime'] + 1
 
             utc_start = datetime.datetime.utcfromtimestamp(build['starttime'])
@@ -557,15 +573,15 @@ class DataLoader(object):
             start_day_ts = (start_day - epoch).total_seconds()
             duration = build['endtime'] - build['starttime']
             if duration < 0:
-                print('Ignoring because duration is less than 0: %d' % bid)
+                state['invalid_duration'].append(bid)
                 continue
 
             existing = existing_rows.get(bid, None)
 
             if existing:
-                print('%d/%d Updating %d' % (state[0], state[1], bid))
-            if not existing:
-                print('%d/%d Adding %d' % (state[0], state[1], bid))
+                state['updates'] += 1
+            else:
+                state['adds'] += 1
 
                 prepared_params = dict(
                     build_id=bid,
@@ -603,7 +619,7 @@ class DataLoader(object):
             )
 
             if not p['request_time']:
-                print('Build does not have defined request time: %d' % bid)
+                state['missing_requesttime'].append(bid)
                 p['request_time'] = 0
 
             for k in props:
@@ -641,7 +657,7 @@ class DataLoader(object):
                     continue
 
                 if k not in self.BUILD_PROPERTIES:
-                    print(k)
+                    # TODO audit and handle.
                     continue
 
                 value = props[k]
