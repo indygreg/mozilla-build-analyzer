@@ -19,7 +19,7 @@ class ConnectionPool(object):
         self._conns = collections.deque()
         self._sem = threading.Semaphore(size)
 
-        for i in range(0, size):
+        for i in range(size):
             self._conns.append(cql.connect(host, port, keyspace,
                 cql_version='3.0.1', *args, **kwargs))
 
@@ -29,8 +29,10 @@ class ConnectionPool(object):
     def conn(self):
         with self._sem:
             conn = self._conns.popleft()
-            yield conn
-            self._conns.append(conn)
+            try:
+                yield conn
+            finally:
+                self._conns.append(conn)
 
 
 class ConnectionBase(object):
