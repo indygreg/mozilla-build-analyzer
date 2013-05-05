@@ -353,6 +353,13 @@ TABLES = {
         AND compression = {'sstable_compression': ''}
     ''',
 
+    'system': b'''
+        CREATE TABLE system (
+            id text PRIMARY KEY,
+            schema_version varint,
+        )
+        WITH comment='Holds state for the system.'
+    ''',
 }
 
 INDICES = {
@@ -399,9 +406,11 @@ class Connection(ConnectionBase):
     def __init__(self, pool, create=True):
         ConnectionBase.__init__(self, pool)
 
+        ks = pool.keyspace
+
         with self.cursor() as c:
             c.execute(b'SELECT * from system.schema_keyspaces WHERE keyspace_name=:ks',
-                {'ks': pool.keyspace})
+                {'ks': ks})
             if not c.rowcount:
                 raise Exception('Please create the %s keyspace.' %
                     pool.keyspace)
@@ -425,6 +434,19 @@ class Connection(ConnectionBase):
             for index, create in INDICES.items():
                 if index not in indices and create:
                     c.execute(create)
+
+            c.execute(b'SELECT schema_version FROM system WHERE id=:id',
+                {'id': 'global'})
+            row = c.fetchone()
+            if not row:
+                c.execute(b'INSERT INTO system (id, schema_version) VALUES '
+                    b'(:id, 1)', {'id': 'global'})
+            else:
+                if row[0] != 1:
+                    raise Exception('Unknown global schema version: %d' %
+                        row[0])
+
+                # TODO handle schema upgrades.
 
         self.builds = BuildConnection(self._pool)
 
