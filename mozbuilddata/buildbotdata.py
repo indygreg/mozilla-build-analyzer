@@ -676,7 +676,10 @@ class DataLoader(object):
                     continue
 
                 if type(value) != target_type:
-                    value = target_type(value)
+                    try:
+                        value = target_type(value)
+                    except ValueError:
+                        continue
 
                 p[target] = value
 
