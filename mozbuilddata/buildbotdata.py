@@ -13,6 +13,7 @@ import hashlib
 import httplib
 import pytz
 import re
+import socket
 import time
 import urllib2
 import zlib
@@ -652,6 +653,14 @@ class DataLoader(object):
                 # No clue what this is for. It looks like a bug.
                 if k == 'make.py[0]:':
                     continue
+
+                # Most values are IP address. Some are hostnames.
+                # TODO store as text, not inet.
+                if k == 'sut_ip':
+                    try:
+                        socket.inet_pton(socket.AF_INET, props[k])
+                    except socket.error:
+                        continue
 
                 if k.endswith('_failure'):
                     continue
