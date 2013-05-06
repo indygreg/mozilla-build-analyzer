@@ -317,6 +317,12 @@ class Commands(object):
 
             print('')
 
+    @Command('build-monthly-stats', category='builds',
+        description='Print monthly statistics of build activity.')
+    def build_monthly_stats(self):
+        for month, stats in self.c.monthly_build_stats():
+            print('%s\t%d\t%d' % (month, stats[0], stats[1]))
+
     @Command('log-cat', category='logs',
         description='Print a raw build log.')
     @CommandArgument('build_id', nargs='+',

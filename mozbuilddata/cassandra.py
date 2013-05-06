@@ -766,3 +766,15 @@ class Connection(ConnectionBase):
 
         return self.file_data(info['log_url'])
 
+    def monthly_build_stats(self):
+        months = {}
+        with self.cursor() as c:
+
+            c.execute(b'SELECT month, number, duration '
+                b'FROM build_monthly_counters')
+
+            for row in c:
+                months[row[0]] = (row[1], row[2])
+
+        for k in sorted(months):
+            yield k, months[k]
