@@ -143,3 +143,35 @@ def parse_build_log(log):
         assert not line
 
     return parsed
+
+
+if __name__ == '__main__':
+    import gzip
+    import sys
+    import urllib2
+
+    from io import BytesIO
+
+    url = sys.argv[1]
+
+    buf = BytesIO(urllib2.urlopen(url).read())
+    gz = gzip.GzipFile(fileobj=buf)
+    log = gz.read()
+
+    parsed = parse_build_log(log)
+
+    steps = []
+    total = datetime.timedelta()
+
+    for step in parsed.steps:
+        duration = step.end - step.start
+        total += duration
+
+        steps.append((step.name[0:50], duration))
+
+    longest = max(len(step[0]) for step in steps)
+
+    for step, duration in steps:
+        percent = float(duration.seconds) / float(total.seconds) * 100
+        print('%s  %s\t%.0f%%' % (step.rjust(longest),
+            str(duration.seconds).rjust(6), percent))
